@@ -1,0 +1,11 @@
+pandas
+plotly
+streamlit
+streamlit-geolocation
+
+
+statsmodels
+watchdog
+geopy
+reverse_geocoder==1.5.1
+geocoder

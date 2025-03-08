@@ -1,0 +1,6 @@
+[submodule "data/GrippeWeb_Daten_des_Wochenberichts"]
+	path = data/GrippeWeb_Daten_des_Wochenberichts
+	url = https://github.com/robert-koch-institut/GrippeWeb_Daten_des_Wochenberichts
+[submodule "data/Abwassersurveillance_AMELAG"]
+	path = data/Abwassersurveillance_AMELAG
+	url = https://github.com/robert-koch-institut/Abwassersurveillance_AMELAG

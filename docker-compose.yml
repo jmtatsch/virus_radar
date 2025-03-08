@@ -1,0 +1,8 @@
+services:
+  streamlit-ui-service:
+    build: .
+    ports:
+      - "8503:8501"
+    restart: always
+    volumes:
+      - ./app.py:/app.py
