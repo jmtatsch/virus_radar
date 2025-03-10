@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code & data
 COPY app.py app.py
+COPY geocode.py geocode.py
 COPY data/ data/
 
 # Add the script to the Docker Image
