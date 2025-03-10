@@ -14,7 +14,8 @@ import pandas as pd
 
 import reverse_geocoder as rg
 import geocoder
-import geopy
+
+from geocode import Geocoder
 
 are_term = 'Influenza, COVID-19 und RSV-Infektionen'
 ili_term = 'Fieber mit Husten oder Halsschmerzen'
@@ -128,12 +129,13 @@ def add_forecasts(df: pd.DataFrame, columns_to_forecast: list, facet_col, predic
     as a new column named '{original_column}_forecast' to the dataframe.
     """
     forecast_dfs = []
-    # df = df.asfreq('W-FRI')
-
+    
     for col in columns_to_forecast:
         # Filter the dataframe for the current illness
         for illness in df[facet_col].unique():
             df_illness = df[df[facet_col] == illness]
+            # set frequency to weekly Friday
+            df_illness = df_illness.asfreq('W-FRI')
 
             # Fit the Exponential Smoothing model for the current column
             model = ExponentialSmoothing(
@@ -160,8 +162,8 @@ def add_forecasts(df: pd.DataFrame, columns_to_forecast: list, facet_col, predic
 
 def plot_forecast(figure, dataframe, facet):
     """
-    Adds forecast traces to the provided Plotly figure based on forecast columns in the dataframe.
-    It groups the data by the given facet and looks for a column ending with '_forecast' to plot.
+    Adds forecast traces to the provided Plotly figure.
+    It looks for _forecast columns in the dataframe, groups the data by the given facet and adds the traces to the plot.
     """
     forecast_cols = [col for col in dataframe.columns if col.endswith('_forecast')]
     if not forecast_cols:
@@ -182,7 +184,17 @@ def plot_forecast(figure, dataframe, facet):
                 name=f'{group} forecast'
             )
         )
-
+    # Add a vertical line for today
+    today = pd.to_datetime('today')
+    figure.add_vline(x=today, line_width=1, line_dash="dash", line_color="red")
+    figure.add_annotation(
+        x=today,
+        y=figure.layout.yaxis.range[1] if figure.layout.yaxis.range else 15,
+        text="Today",
+        showarrow=False,
+        xanchor="right",
+        yanchor="top"
+    )
     return figure
 
 
@@ -197,44 +209,33 @@ def decompose_and_plot(df: pd.DataFrame, illness: str, infected_column: str):
     return fig
 
 
-def find_closest_klaerwerk(df, coordinates):
+def find_closest_klaerwerk(df, user_location) -> str:
     """
     Finds the closest wastewater treatment plant (Klärwerk) to the given coordinates.
     """
-    # add latitude and longitude to the dataframe
-    # apply geopy to get the coordinates of the location
-    return 'München'
-    # FIXME: this is not working
-    # df['coordinates'] = df.apply(lambda x: service.geocode(x['standort'] + ', ' + x['bundesland']), axis=1)
-    df['latitude'] = df['coordinates'].apply(lambda x: x.latitude)
-    df['longitude'] = df['coordinates'].apply(lambda x: x.longitude)
-    df['distance'] = ((df['latitude'] - coordinates[0]) ** 2 + (df['longitude'] - coordinates[1]) ** 2) ** 0.5
-    closest_klaerwerk = df.loc[df['distance'].idxmin()]
-    return closest_klaerwerk
+    local_geocoder = Geocoder()
+    # get distinct standort
+    distinct_standorte = sorted(df['standort'].dropna().unique())
+    import pandas as pd
+    distinct_standorte = pd.DataFrame(distinct_standorte, columns=['standort'])
+    distinct_standorte['coordinates'] = distinct_standorte.apply(lambda x: local_geocoder.geocode(city=x['standort'], country='DE'), axis=1)
+    distinct_standorte['latitude'] = distinct_standorte['coordinates'].apply(lambda x: x[0])
+    distinct_standorte['longitude'] = distinct_standorte['coordinates'].apply(lambda x: x[1])
+    distinct_standorte['distance'] = ((distinct_standorte['latitude'] - user_location['latitude']) ** 2 + (distinct_standorte['longitude'] - user_location['longitude']) ** 2) ** 0.5
+    closest_klaerwerk = distinct_standorte.loc[distinct_standorte['distance'].idxmin()]
+    return closest_klaerwerk['standort']
 
 
-st.title('Virus Radar')
+st.title('Virus Radar 🦠')
 
-st.expander('Informationen', expanded=True).markdown(
+st.expander('Über', expanded=False).markdown(
     """
  Virus Radar aggregiert, prädiziert und visualisiert Virusinfektionen in Deutschland.
-
- *Nutzer können:*
-
- Aktuelle Infektionszahlen für verschiedene Viren in ihrer Region einsehen.
- Trends analysieren und prognostische Modelle nutzen, um zukünftige Entwicklungen abzuschätzen.
-
- *Ziel:*
-
- Nutzer sollen fundierte Entscheidungen treffen können, ob sie ins Büro pendeln, Menschenmassen meiden oder ihre Kinder in den Kindergarten schicken.
- 
- *Zielgruppen:*
-
- Allgemeinbevölkerung: Jeder, der sich über die aktuelle Gesundheitslage informieren möchte.
- Eltern und Familien: Entscheidungen über den Schul- und Kindergartenbesuch ihrer Kinder.
- Arbeitgeber und Unternehmen: Planung von Arbeitsabläufen und Home-Office-Regelungen.
- Gesundheitsbehörden und Entscheidungsträger: Unterstützung bei der Entwicklung und Implementierung von Gesundheitsstrategien.
- Bildungseinrichtungen: Information für die Organisation des Schulbetriebs.
+ Nutzer können aktuelle Infektionszahlen für verschiedene Viren in ihrer Region einsehen und prädiktive Modelle nutzen, um zukünftige Entwicklungen abzuschätzen.
+ Ziel ist es, dass Nutzer fundierte Entscheidungen treffen können, ob sie z.B. 
+ * gefahrenlos ins Büro können oder besser im Homeoffice bleiben sollten
+ * Menschenmassen besser meiden sollten
+ * ihre Kinder in den Kindergarten schicken oder besser ein paar Tage zuhause lassen sollten
     """
 )
 
@@ -247,7 +248,6 @@ tab1, tab2,  = st.tabs(["Grippeweb", "Abwasser"])
 with tab2:
     # Load the abwasser data
     abwasser = pd.read_csv('data/Abwassersurveillance_AMELAG/amelag_einzelstandorte.tsv', sep='\t')
-
     distinct_province_short = sorted(abwasser['bundesland'].dropna().unique())
     if 'province_short' in location:
         if location['province_short'] in distinct_province_short:
@@ -255,7 +255,7 @@ with tab2:
 
     selected_bundesland = st.selectbox('Bundesland', distinct_province_short, index=land_index)
 
-    closest_klaerwerk= find_closest_klaerwerk(abwasser, location)
+    closest_klaerwerk = find_closest_klaerwerk(abwasser, location)
     distinct_standorte = sorted(
         abwasser[abwasser['bundesland'] == selected_bundesland]['standort'].dropna().unique()
     )
@@ -268,13 +268,19 @@ with tab2:
     abwasser = abwasser[abwasser['typ'] != "Influenza A+B"]
     abwasser.set_index('datum', inplace=True)
 
-    # forecast needs at least 2 yrs of data
+    # forecast would need at least 2 yrs of data so not active for now
     # abwasser = add_forecasts(abwasser, ['loess_vorhersage'], facet_col='typ', periods=365)
+    last_updated = pd.to_datetime(abwasser.index.max()).date()
+    # start date is last update - 2 years
+    start_date = last_updated - pd.DateOffset(years=1)
 
     fig_abwasser = px.area(abwasser, y='loess_vorhersage', color='typ', title=f'Geglättete Abwasserwerte {standort}', labels={'datum': '', 'loess_vorhersage': 'Loess geglättete Werte', 'typ': 'Virus'})
     # fig_abwasser = plot_forecast(fig_abwasser, abwasser, 'typ')
+    fig_abwasser.update_xaxes(type="date", range=[start_date, last_updated])
 
     st.plotly_chart(fig_abwasser, use_container_width=True)
+    st.write("Last data update: ", last_updated)
+
 
 with tab1:
     # Load the grippeweb data
@@ -297,12 +303,17 @@ with tab1:
     grippeweb[percentage_infected_term] = (grippeweb['Inzidenz'] / 100000) * 100
 
     # By focus area
-    grippeweb_region = grippeweb[grippeweb['Region'] == region]
+    grippeweb_region = grippeweb[grippeweb['Region'] == region].copy()
     grippeweb_region['Erkrankung'] = grippeweb_region['Erkrankung'].replace({'ILI': ili_term, 'ARE': are_term})
+    last_updated = pd.to_datetime(grippeweb_region.index.max())
+    start_date = last_updated - pd.DateOffset(years=2)
 
     grippeweb_region = add_forecasts(grippeweb_region, [percentage_infected_term], facet_col='Erkrankung')
-    fig_by_focus_area = px.area(grippeweb_region, y=percentage_infected_term, color='Erkrankung', title=f'Region {region}', labels={'index': ''})
-    fig_by_focus_area = plot_forecast(fig_by_focus_area, grippeweb_region, 'Erkrankung')
+    end_date = pd.to_datetime(grippeweb_region.index.max())
+    are_ili_by_region = px.area(grippeweb_region, y=percentage_infected_term, color='Erkrankung', title=f'Region {region}', labels={'index': ''})
+    are_ili_by_region = plot_forecast(are_ili_by_region, grippeweb_region, 'Erkrankung')
+    are_ili_by_region.update_xaxes(type="date", range=[start_date, end_date])
+
 
     # Age groups only exist for bundesweite data
     bundesweit = grippeweb[grippeweb['Region'] == "Bundesweit"]
@@ -310,18 +321,23 @@ with tab1:
     altersgruppen = st.multiselect('Altersgruppen', ['0-4', '5-14', '15-34', '35-59', '60+'], default=['0-4', '5-14'])
     bundesweit = bundesweit[bundesweit['Altersgruppe'].isin(altersgruppen)]
 
-    # Akute respiratorischer Erkrankungen (ARE)
+    # Akute respiratorische Erkrankungen (ARE)
     bundesweit_are = bundesweit[bundesweit['Erkrankung'] == "ARE"]
     bundesweit_are = add_forecasts(bundesweit_are, [percentage_infected_term], facet_col='Altersgruppe')
     are_by_age_groups = px.line(bundesweit_are, y=percentage_infected_term, color='Altersgruppe', title=f'{are_term} nach Altersgruppen', labels={'index': ''})
     are_by_age_groups = plot_forecast(are_by_age_groups, bundesweit_are, 'Altersgruppe')
+    are_by_age_groups.update_xaxes(type="date", range=[start_date, end_date])
+
 
     # Grippeähnliche Erkrankungen (ILI)
     bundesweit_ili = bundesweit[bundesweit['Erkrankung'] == "ILI"]
     bundesweit_ili = add_forecasts(bundesweit_ili, [percentage_infected_term], facet_col='Altersgruppe')
     ili_by_age_groups = px.line(bundesweit_ili, y=percentage_infected_term, color='Altersgruppe', title=f'{ili_term} nach Altersgruppen', labels={'index': ''})
     ili_by_age_groups = plot_forecast(ili_by_age_groups, bundesweit_ili, 'Altersgruppe')
+    ili_by_age_groups.update_xaxes(type="date", range=[start_date, end_date])
 
-    st.plotly_chart(fig_by_focus_area, use_container_width=True)
+
+    st.plotly_chart(are_ili_by_region, use_container_width=True)
     st.plotly_chart(are_by_age_groups, use_container_width=True)
     st.plotly_chart(ili_by_age_groups, use_container_width=True)
+    st.write("Last data update: ", last_updated)
