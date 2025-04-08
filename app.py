@@ -214,10 +214,10 @@ def find_closest_klaerwerk(df, user_location) -> str:
     Finds the closest wastewater treatment plant (Klärwerk) to the given coordinates.
     """
     local_geocoder = Geocoder()
-    # get distinct standort
+    # get distinct standorte
     distinct_standorte = sorted(df['standort'].dropna().unique())
-    import pandas as pd
     distinct_standorte = pd.DataFrame(distinct_standorte, columns=['standort'])
+    # add coordinates for each standort
     distinct_standorte['coordinates'] = distinct_standorte.apply(lambda x: local_geocoder.geocode(city=x['standort'], country='DE'), axis=1)
     distinct_standorte['latitude'] = distinct_standorte['coordinates'].apply(lambda x: x[0])
     distinct_standorte['longitude'] = distinct_standorte['coordinates'].apply(lambda x: x[1])

@@ -4,7 +4,7 @@ WORKDIR /app
 
 #Install Cron
 RUN apt-get update
-RUN apt-get -y install cron
+RUN apt-get -y install cron git
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
