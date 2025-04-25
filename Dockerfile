@@ -3,8 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 #Install Cron
-RUN apt-get update
-RUN apt-get -y install cron git
+RUN apt-get update && apt-get -y install cron git nano
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
@@ -15,14 +14,17 @@ COPY app.py app.py
 COPY geocode.py geocode.py
 COPY data/ data/
 
+COPY .git /app/.git
+COPY .gitmodules /app/.gitmodulesy
+
 # Add the script to the Docker Image
-ADD update.sh /root/update.sh
+ADD update.sh /app/update.sh
 
 # Give execution rights on the cron scripts
-RUN chmod 0644 /root/update.sh
+RUN chmod 0644 /app/update.sh
 
 # Add the cron job for hourly update
-RUN crontab -l | { cat; echo "@hourly bash /root/update.sh"; } | crontab -
+RUN crontab -l | { cat; echo "@hourly bash /app/update.sh"; } | crontab -
 
 # Expose port 8501, default for Streamlit, and run the app
 EXPOSE 8501
