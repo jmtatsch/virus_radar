@@ -1,10 +1,6 @@
 import itertools
 
 import streamlit as st
-from streamlit.runtime.scriptrunner import get_script_run_ctx
-from streamlit.web.server.websocket_headers import _get_websocket_headers
-from streamlit import runtime
-from streamlit_geolocation import streamlit_geolocation
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -12,15 +8,13 @@ from statsmodels.tsa.seasonal import MSTL
 from statsmodels.tsa.api import ExponentialSmoothing
 import pandas as pd
 
-import reverse_geocoder as rg
-import geocoder
-
 from geocode import Geocoder
+from location_manager import LocationManager
 
 are_term = 'Influenza, COVID-19 und RSV-Infektionen'
 ili_term = 'Fieber mit Husten oder Halsschmerzen'
 percentage_infected_term = 'Erkrankte Bevölkerung in %'
-location = {}
+
 
 st.set_page_config(
     page_title="VirusRadar",
@@ -28,108 +22,24 @@ st.set_page_config(
     layout="wide",
 )
 
-def get_forwarded_ip() -> str | None:
-    """
-    Get the IP address from the X-Forwarded-For header.
-    This is useful when the app is behind a reverse proxy or load balancer.
-    """
-    headers = st.context.headers
-    # Example: "X-Forwarded-For': '13.51.91.225, 162.158.90.188'"
-    if 'X-Forwarded-For' in headers:
-        x_forwarded_for = headers['X-Forwarded-For']
-        first_ip = x_forwarded_for.split(', ')[0]
 
-        return first_ip
-    else:
-        return None
+hide_decoration_bar_style = '''
+    <style>
+        header {visibility: hidden;}
+    </style>
+'''
+st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
+location_manager = LocationManager()
 
-# map admin2 to short name e.g. 'bavaria' to 'BY'
-province2short = {
-    'Baden-Württemberg': 'BW',
-    'Bavaria': 'BY',
-    'Berlin': 'BE',
-    'Brandenburg': 'BB',
-    'Bremen': 'HB',
-    'Hamburg': 'HH',
-    'Hessen': 'HE',
-    'Mecklenburg-Vorpommern': 'MV',
-    'Niedersachsen': 'NI',
-    'Nordrhein-Westfalen': 'NW',
-    'Rheinland-Pfalz': 'RP',
-    'Saarland': 'SL',
-    'Sachsen': 'SN',
-    'Sachsen-Anhalt': 'ST',
-    'Schleswig-Holstein': 'SH',
-    'Thüringen': 'TH'
-}
-
-# check that all short provinces are in province2short
-for province in ['BB', 'BE', 'BW', 'BY', 'HB', 'HE', 'HH', 'MV', 'NI', 'NW', 'RP', 'SH', 'SL', 'SN', 'ST', 'TH']:
-    assert province in province2short.values()
-
-# map admin2 to ['Mitte (West)', 'Norden (West)', 'Osten', 'Sueden']
-province2region = {
-    'BW': 'Sueden',
-    'BY': 'Sueden',
-    'BE': 'Mitte (West)',
-    'BB': 'Osten',
-    'HB': 'Norden (West)',
-    'HH': 'Norden (West)',
-    'HE': 'Mitte (West)',
-    'MV': 'Osten',
-    'NI': 'Norden (West)',
-    'NW': 'Mitte (West)',
-    'RP': 'Mitte (West)',
-    'SL': 'Mitte (West)',
-    'SN': 'Osten',
-    'ST': 'Osten',
-    'SH': 'Norden (West)',
-    'TH': 'Osten'
-}
-
-# check that all short provinces are in province2region
-for province in ['BB', 'BE', 'BW', 'BY', 'HB', 'HE', 'HH', 'MV', 'NI', 'NW', 'RP', 'SH', 'SL', 'SN', 'ST', 'TH']:
-    assert province in province2region.keys(), f'{province} not in province2region'
-
-
-# get ip address
-ip_address = get_forwarded_ip()
-
-if ip_address:
-    geocoder_result = geocoder.ipinfo(ip_address)
-    if geocoder_result.error is False:
-        location['city'] = geocoder_result.current_result.city
-        location['country'] = geocoder_result.current_result.country
-        location['province'] = geocoder_result.current_result.province
-        location['latitude'] = geocoder_result.current_result.lat
-        location['longitude'] = geocoder_result.current_result.lng
-    else:
-        st.write("Error getting location from IP address, please allow location access in your browser.")
-        location_result = streamlit_geolocation()
-        location['latitude'] = location_result['latitude']
-        location['longitude'] = location_result['longitude']
-
-if 'latitude' in location and 'longitude' in location and not 'province' in location:
-    # get the coordinates from the location
-    coordinates = (location['latitude'], location['longitude'])
-    geocode = rg.search(coordinates, mode=1)
-    # transform administrative area to bundesland, bavaria to BY
-    location['province'] = geocode[0]['admin1']
-
-# now we should have the province
-location['province_short'] = province2short[location['province']]
-location['region'] = province2region[location['province_short']]
-
-
-def add_forecasts(df: pd.DataFrame, columns_to_forecast: list, facet_col, prediction_horizon: int = 24, periods: int = 52):
+def add_forecasts(df: pd.DataFrame, columns_to_forecast: list, facet_col: str, prediction_horizon: int = 24, periods: int = 52):
     """
     For each column in columns_to_forecast, this function fits an Exponential Smoothing model,
     generates a forecast for prediction_horizon time steps, and adds the fitted values and forecast
     as a new column named '{original_column}_forecast' to the dataframe.
     """
     forecast_dfs = []
-    
+
     for col in columns_to_forecast:
         # Filter the dataframe for the current illness
         for illness in df[facet_col].unique():
@@ -249,18 +159,20 @@ with tab2:
     # Load the abwasser data
     abwasser = pd.read_csv('data/Abwassersurveillance_AMELAG/amelag_einzelstandorte.tsv', sep='\t')
     distinct_province_short = sorted(abwasser['bundesland'].dropna().unique())
-    if 'province_short' in location:
-        if location['province_short'] in distinct_province_short:
-            land_index = distinct_province_short.index(location['province_short'])
+    if 'province_short' in location_manager.location:
+        if location_manager.location['province_short'] in distinct_province_short:
+            land_index = distinct_province_short.index(location_manager.location['province_short'])
 
     selected_bundesland = st.selectbox('Bundesland', distinct_province_short, index=land_index)
+    distinct_standorte = sorted(abwasser[abwasser['bundesland'] == selected_bundesland]['standort'].dropna().unique())
 
-    closest_klaerwerk = find_closest_klaerwerk(abwasser, location)
-    distinct_standorte = sorted(
-        abwasser[abwasser['bundesland'] == selected_bundesland]['standort'].dropna().unique()
-    )
+    if location_manager.location['latitude'] is not None and location_manager.location['longitude'] is not None:
+        closest_klaerwerk = find_closest_klaerwerk(abwasser, location_manager.location)
+        klaerwerk_index = distinct_standorte.index(closest_klaerwerk)
+    else:
+        # if no location is available, set the index to 0
+        klaerwerk_index = 0
 
-    klaerwerk_index = distinct_standorte.index(closest_klaerwerk)
 
     standort = st.selectbox('Klärwerk', distinct_standorte, index=klaerwerk_index)
 
@@ -288,12 +200,12 @@ with tab1:
 
     regions = sorted(grippeweb['Region'].unique())
 
-    if 'region' in location:
+    if 'region' in location_manager.location:
         # if region is in the list of regions, set it as default
-        if location['region'] in regions:
-            region_index = regions.index(location['region'])
-        else:
-            region_index = 0
+        if location_manager.location['region'] in regions:
+            region_index = regions.index(location_manager.location['region'])
+    else:
+        region_index = 4
     region = st.selectbox('Region', regions, key='region', index=region_index)
 
     grippeweb[['Jahr', 'Woche']] = grippeweb['Kalenderwoche'].str.split('-W', expand=True)

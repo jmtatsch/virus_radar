@@ -12,10 +12,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code & data
 COPY app.py app.py
 COPY geocode.py geocode.py
+COPY location_manager.py location_manager.py
+COPY .streamlit .streamlit
 COPY data/ data/
 
 COPY .git /app/.git
-COPY .gitmodules /app/.gitmodulesy
+COPY .gitmodules /app/.gitmodules
 
 # Add the script to the Docker Image
 ADD update.sh /app/update.sh

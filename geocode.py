@@ -21,6 +21,19 @@ class Geocoder:
 
 
     def download_zip(self):
+        """
+        Downloads a file from the URL specified in the instance and saves it as a ZIP file to the download path.
+
+        This method makes an HTTP GET request to the URL stored in the instance attribute 'url'. It raises an HTTPError
+        if the request fails. Upon a successful response, it writes the binary content of the response to a file located at
+        the path specified by the instance attribute 'download_path' and returns this path.
+
+        Returns:
+            str: The file path where the ZIP file has been saved.
+
+        Raises:
+            HTTPError: If the HTTP request returned an unsuccessful status code.
+        """
         response = requests.get(self.url)
         response.raise_for_status()
         with open(self.download_path, "wb") as f:
@@ -28,6 +41,18 @@ class Geocoder:
         return self.download_path
 
     def unzip_file(self):
+        """
+        Extracts the first file from the zip archive specified by self.download_path and returns its full path.
+
+        This method performs the following actions:
+            1. Checks if the directory given by self.extract_dir exists and creates it if not.
+            2. Opens the zip file at self.download_path and extracts its contents into self.extract_dir.
+            3. Retrieves the list of files in the zip archive and returns the full path to the first file.
+            4. If the zip file is empty, it returns None.
+
+        Assumes:
+            - The zip archive contains exactly one file.
+        """
         if not os.path.exists(self.extract_dir):
             os.makedirs(self.extract_dir)
         with zipfile.ZipFile(self.download_path, "r") as zip_ref:
@@ -37,6 +62,36 @@ class Geocoder:
         return os.path.join(self.extract_dir, files[0]) if files else None
 
     def load_dataframe(self, filepath, delimiter="\t"):
+        """
+        Loads a tabular dataset from a specified file into a pandas DataFrame using predefined column names.
+
+        Parameters:
+            filepath (str): The path to the input file containing the data.
+            delimiter (str, optional): The delimiter used to separate the values in the file.
+                                       Defaults to tab ("\t").
+
+        Returns:
+            pandas.DataFrame: A DataFrame with the following columns:
+                - "geonameid"
+                - "name"
+                - "asciiname"
+                - "alternatenames"
+                - "latitude"
+                - "longitude"
+                - "feature_class"
+                - "feature_code"
+                - "country_code"
+                - "cc2"
+                - "admin1_code"
+                - "admin2_code"
+                - "admin3_code"
+                - "admin4_code"
+                - "population"
+                - "elevation"
+                - "dem"
+                - "timezone"
+                - "modification_date"
+        """
         # Column names
         columns = [
                 "geonameid", "name", "asciiname", "alternatenames", "latitude", "longitude",
