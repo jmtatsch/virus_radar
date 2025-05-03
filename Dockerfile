@@ -23,7 +23,7 @@ COPY .gitmodules /app/.gitmodules
 ADD update.sh /app/update.sh
 
 # Give execution rights on the cron scripts
-RUN chmod 0644 /app/update.sh
+RUN chmod +x /app/update.sh
 
 # Add the cron job for hourly update
 RUN crontab -l | { cat; echo "@hourly bash /app/update.sh"; } | crontab -

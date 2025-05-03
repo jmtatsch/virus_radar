@@ -16,8 +16,7 @@ def test_geocode():
     ]
 
     for city, state, country in test_cases:
-        result = geocoder.geocode(city, state, country)
+        result = geocoder.geocode(city, country)
         print(f"Coordinates of {city}, {state}, {country}: {result}")
 
         assert result != (None,None), f"Geocode failed for {city}, {state}, {country}"
-

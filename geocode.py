@@ -1,10 +1,60 @@
-# download zip file from geonames
+"""
+This script defines a local Geocoder class that downloads, extracts, and parses geospatial data from the GeoNames dataset.
+It provides functionality to locally reverse geocode cities by retrieving their latitude and longitude from the dataset.
+The Geocoder class is initialized with a URL to the GeoNames cities1000 dataset, and it handles downloading,
+extracting, and loading the data into a pandas DataFrame.
+The geocode method allows users to find the coordinates of a specified city, with optional country filtering.
+"""
+
 import os
-import requests
 import zipfile
+
+import requests
 import pandas as pd
 
 class Geocoder:
+    """
+    The Geocoder class is designed to handle the process of downloading, extracting, and parsing geospatial data
+    from the GeoNames dataset (specifically the cities1000 dataset). It facilitates geocoding operations by loading 
+    the dataset into a pandas DataFrame and providing a method to retrieve the latitude and longitude of a specified
+    city (with optional country filtering).
+
+    Attributes:
+        url (str): The URL to download the GeoNames cities1000 dataset ZIP file.
+        download_path (str): The local file path where the downloaded ZIP file is saved.
+        extract_dir (str): The directory where the ZIP file's contents are extracted.
+        file_path (str): The path to the extracted data file (expected to be in the 'cities1000/cities1000.txt' location).
+        data (pandas.DataFrame): The DataFrame containing the geospatial data loaded from the extracted file.
+
+    Methods:
+        __init__:
+            Initializes the Geocoder by checking for the existence of the required data file. If the file does not exist,
+            it triggers the download and extraction process and subsequently loads the data into a DataFrame.
+        
+        download_zip():
+            Downloads the ZIP file from the specified URL and saves it to the local download_path. If the HTTP request fails,
+            an HTTPError is raised.
+        
+        unzip_file():
+            Unzips the downloaded ZIP file into the specified extract_dir. This method assumes that the ZIP file contains
+            exactly one file and returns the full path to the extracted file. It automatically creates the extraction directory 
+            if it does not already exist.
+        
+        load_dataframe(filepath, delimiter="\t"):
+            Reads the tab-delimited data file given by filepath into a pandas DataFrame using predefined column names.
+        
+        geocode(city: str, country=None) -> tuple[float, float] | tuple[None, None]:
+            Locates and returns the latitude and longitude of the specified city by filtering the DataFrame (with an optional 
+            country filter). It tries to match the city against multiple columns (name, asciiname, alternatenames) and returns
+            the coordinates of the most likely match, preferably by population ranking if multiple matches are found.
+
+    Example:
+        geocoder = Geocoder()
+        latitude, longitude = geocoder.geocode("Berlin", country="DE")
+        if latitude is not None and longitude is not None:
+            print(f"Coordinates of Berlin: {latitude}, {longitude}")
+            print("City not found.")
+    """
     def __init__(self, url="https://download.geonames.org/export/dump/cities1000.zip", download_path="cities1000.zip", extract_dir="cities1000"):
         self.url = url
         self.download_path = download_path
@@ -17,6 +67,7 @@ class Geocoder:
             print(f"File {self.file_path} does not exist. Downloading...")
             self.download_zip()
             self.file_path = self.unzip_file()
+            os.remove(self.download_path)
         self.data = self.load_dataframe(self.file_path)
 
 
@@ -34,7 +85,7 @@ class Geocoder:
         Raises:
             HTTPError: If the HTTP request returned an unsuccessful status code.
         """
-        response = requests.get(self.url)
+        response = requests.get(self.url, timeout=30)
         response.raise_for_status()
         with open(self.download_path, "wb") as f:
             f.write(response.content)
@@ -101,7 +152,7 @@ class Geocoder:
         ]
         return pd.read_csv(filepath, delimiter=delimiter, low_memory=False, names=columns, encoding="utf-8")
 
-    def geocode(self, city, state=None, country=None) -> tuple[float, float] | tuple[None, None]:
+    def geocode(self, city: str, country=None) -> tuple[float, float] | tuple[None, None]:
         """"
         "Geocode a city using the geonames database.
         Parameters:
@@ -110,7 +161,7 @@ class Geocoder:
             country (str, optional): The country.
         Returns:
             tuple: A tuple containing the latitude and longitude of the city.
-        """ 
+        """
         data = self.data.copy()
 
         # these require a different table to resolve admin code and thus are not active
@@ -120,7 +171,7 @@ class Geocoder:
 
         if country:
             data = data[data['country_code'].str.lower() == country.lower()]
-        
+
         result = data[data['name'].str.lower() == city.lower()]
 
         # if there are no results, try to match the city name with the 'asciiname' column
@@ -129,7 +180,7 @@ class Geocoder:
 
         # if there are no results, try to match the city name with the 'alternatenames' column
         if result.empty:
-            result = data[data['alternatenames'].str.contains(city.lower(), case=False, na=False)]
+            result = data[data['alternatenames'].str.contains(city.lower(), case=False, na=False, regex=False)]
 
         # if there are multiple results, return the most likely one
         if len(result) > 1:
@@ -146,6 +197,6 @@ class Geocoder:
 if __name__ == "__main__":
     geocoder = Geocoder()
 
-    city = "München"
-    result = geocoder.geocode(city)
-    print(f"Coordinates of {city}: {result}")
+    CITY = "München"
+    geocode_result = geocoder.geocode(CITY)
+    print(f"Coordinates of {CITY}: {geocode_result}")
