@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py app.py
 COPY geocode.py geocode.py
 COPY location_manager.py location_manager.py
-COPY .streamlit .streamlit
+COPY .streamlit/ .streamlit/
 COPY data/ data/
 
 COPY .git /app/.git
@@ -30,4 +30,4 @@ RUN crontab -l | { cat; echo "@hourly bash /app/update.sh"; } | crontab -
 
 # Expose port 8501, default for Streamlit, and run the app
 EXPOSE 8501
-CMD ["streamlit", "run", "app.py", "--server.port", "8501"]
+CMD ["streamlit", "run", "app.py"]

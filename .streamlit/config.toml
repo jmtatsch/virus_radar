@@ -1,2 +1,9 @@
 [ui]
 hideTopBar = true
+
+[browser]
+gatherUsageStats = false
+
+[server]
+fileWatcherType = "auto"
+port = 8501
