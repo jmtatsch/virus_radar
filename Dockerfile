@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -22,12 +22,18 @@ COPY .gitmodules /app/.gitmodules
 # Add the script to the Docker Image
 ADD update.sh /app/update.sh
 
+# Add the entrypoint script
+ADD docker-entrypoint.sh /app/docker-entrypoint.sh
+
 # Give execution rights on the cron scripts
 RUN chmod +x /app/update.sh
+
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Add the cron job for hourly update
 RUN crontab -l | { cat; echo "@hourly bash /app/update.sh"; } | crontab -
 
 # Expose port 8501, default for Streamlit, and run the app
 EXPOSE 8501
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["streamlit", "run", "app.py"]
