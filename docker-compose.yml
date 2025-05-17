@@ -5,4 +5,4 @@ services:
       - "8503:8501"
     restart: always
     volumes:
-      - ./app.py:/app.py
+      - ./app.py:/app/app.py
