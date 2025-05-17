@@ -74,17 +74,23 @@ def plot_forecast(figure, dataframe, facet):
     """
     Adds forecast traces to the provided Plotly figure.
     It looks for _forecast columns in the dataframe, groups the data by the given facet and adds the traces to the plot.
+    Ensures forecast lines use the same color as their corresponding historical data.
     """
     forecast_cols = [col for col in dataframe.columns if col.endswith('_forecast')]
     if not forecast_cols:
         return figure
     forecast_col = forecast_cols[0]
 
-    colors = itertools.cycle(px.colors.qualitative.Plotly)
+    # Get the colors from the existing traces
+    color_map = {}
+    for trace in figure.data:
+        if trace.name in dataframe[facet].unique():
+            color_map[trace.name] = trace.line.color
 
     for group in sorted(dataframe[facet].unique()):
         df_temp = dataframe[dataframe[facet] == group]
-        color = next(colors)
+        # Use the same color as the original trace
+        color = color_map.get(group)
         figure.add_trace(
             go.Scatter(
                 x=df_temp.index,
@@ -186,7 +192,9 @@ with tab2:
     # start date is last update - 2 years
     start_date = last_updated - pd.DateOffset(years=1)
 
-    fig_abwasser = px.area(abwasser, y='loess_vorhersage', color='typ', title=f'Geglättete Abwasserwerte {standort}', labels={'datum': '', 'loess_vorhersage': 'Loess geglättete Werte', 'typ': 'Virus'})
+    fig_abwasser = px.area(abwasser, y='loess_vorhersage', color='typ',
+                           title=f'Geglättete Abwasserwerte {standort}',
+                           labels={'datum': '', 'loess_vorhersage': 'Loess geglättete Werte', 'typ': 'Virus'})
     # fig_abwasser = plot_forecast(fig_abwasser, abwasser, 'typ')
     fig_abwasser.update_xaxes(type="date", range=[start_date, last_updated])
 
@@ -253,3 +261,21 @@ with tab1:
     st.plotly_chart(are_by_age_groups, use_container_width=True)
     st.plotly_chart(ili_by_age_groups, use_container_width=True)
     st.write("Last data update: ", last_updated)
+
+text_footer = f"""
+    <style>
+        footer {{visibility: hidden;}}
+    </style>
+    <p style="font-size: 0.8em;display:block;text-align:center;">
+        &copy;{2025} {"Ceyeborg GmbH"} ·
+        <a href="https://ceyeb.org/privacy-policy/"
+           style="text-decoration: none; color: #FFFFFF;">
+        Privacy Policy
+        </a> ·
+        <a href="https://ceyeb.org/legal-notice/"
+           style="text-decoration: none; color: #FFFFFF;">
+        Legal Notice
+        </a>
+    </p>
+    """
+st.markdown(text_footer, unsafe_allow_html=True)

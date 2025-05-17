@@ -5,5 +5,12 @@ hideTopBar = true
 gatherUsageStats = false
 
 [server]
-fileWatcherType = "auto"
+fileWatcherType = "none"
 port = 8501
+
+[theme]
+primaryColor="#E40EAB" # purple
+backgroundColor="#000A32"
+secondaryBackgroundColor="#000E47"
+textColor="#FFFFFF"
+font="sans serif"
