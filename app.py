@@ -144,13 +144,13 @@ def find_closest_klaerwerk(df, user_location) -> str:
 
 st.title('Virus Radar 🦠')
 
-st.expander('Über', expanded=False).markdown(
+st.markdown(
     """
  Virus Radar aggregiert, prädiziert und visualisiert Virusinfektionen in Deutschland.
  Nutzer können aktuelle Infektionszahlen für verschiedene Viren in ihrer Region einsehen und prädiktive Modelle nutzen, um zukünftige Entwicklungen abzuschätzen.
  Ziel ist es, dass Nutzer fundierte Entscheidungen treffen können, ob sie z.B. 
  * gefahrenlos ins Büro können oder besser im Homeoffice bleiben sollten
- * Menschenmassen besser meiden sollten
+ * Menschenmengen besser meiden sollten
  * ihre Kinder in den Kindergarten schicken oder besser ein paar Tage zuhause lassen sollten
     """
 )

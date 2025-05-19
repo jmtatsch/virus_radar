@@ -32,6 +32,8 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # Add the cron job for hourly update
 RUN crontab -l | { cat; echo "@hourly bash /app/update.sh"; } | crontab -
+# Create a log file to be able to run tail
+RUN touch /var/log/cron.log
 
 # Expose port 8501, default for Streamlit, and run the app
 EXPOSE 8501
