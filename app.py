@@ -1,5 +1,3 @@
-import itertools
-
 import streamlit as st
 
 import plotly.express as px
@@ -187,14 +185,17 @@ with tab2:
     abwasser.set_index('datum', inplace=True)
 
     # forecast would need at least 2 yrs of data so not active for now
-    # abwasser = add_forecasts(abwasser, ['loess_vorhersage'], facet_col='typ', periods=365)
+    # abwasser = add_forecasts(abwasser, ['vorhersage'], facet_col='typ', periods=365)
     last_updated = pd.to_datetime(abwasser.index.max()).date()
     # start date is last update - 2 years
     start_date = last_updated - pd.DateOffset(years=1)
 
-    fig_abwasser = px.area(abwasser, y='loess_vorhersage', color='typ',
-                           title=f'Geglättete Abwasserwerte {standort}',
-                           labels={'datum': '', 'loess_vorhersage': 'Loess geglättete Werte', 'typ': 'Virus'})
+    # Only use 'vorhersage' as y column, no fallback
+    fig_abwasser = px.area(
+        abwasser, y='vorhersage', color='typ',
+        title=f'Geglättete Abwasserwerte {standort}',
+        labels={'datum': '', 'vorhersage': 'Vorhersage', 'typ': 'Virus'}
+    )
     # fig_abwasser = plot_forecast(fig_abwasser, abwasser, 'typ')
     fig_abwasser.update_xaxes(type="date", range=[start_date, last_updated])
 
