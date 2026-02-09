@@ -1,4 +1,4 @@
-pandas==2.2.3
+pandas==3.0.0
 plotly==6.5.2
 streamlit==1.54.0
 streamlit-geolocation==0.0.10
