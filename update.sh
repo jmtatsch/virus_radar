@@ -1,3 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+set -e
+
+echo "[$(date)] Starting data update..."
 cd /app
-git submodule update --recursive --remote
+/usr/bin/git submodule update --recursive --remote
+echo "[$(date)] Data update completed successfully"

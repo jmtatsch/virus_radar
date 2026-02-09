@@ -1,4 +1,5 @@
-from geocode import Geocoder   
+from geocode import Geocoder
+
 
 def test_geocode():
     """
@@ -13,10 +14,14 @@ def test_geocode():
         ("Munich", None, None),
         ("München", None, None),
         ("Altötting", "BY", "DE"),
+        ("Wolfratshausen", "BY", "DE"),
+        ("Geretsried", "BY", "DE"),
+        ("Starnberg", "BY", "DE"),
+        ("Bad Tölz", "BY", "DE"),
     ]
 
     for city, state, country in test_cases:
         result = geocoder.geocode(city, country)
         print(f"Coordinates of {city}, {state}, {country}: {result}")
 
-        assert result != (None,None), f"Geocode failed for {city}, {state}, {country}"
+        assert result != (None, None), f"Geocode failed for {city}, {state}, {country}"
