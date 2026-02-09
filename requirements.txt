@@ -3,7 +3,7 @@ plotly==5.18.0
 streamlit==1.54.0
 streamlit-geolocation==0.0.10
 statsmodels==0.14.1
-watchdog==4.0.0
+watchdog==6.0.0
 geopy==2.4.1
 reverse_geocoder==1.5.1
 geocoder==1.38.1
