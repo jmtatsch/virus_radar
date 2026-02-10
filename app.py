@@ -59,71 +59,149 @@ def get_traffic_light_status(
             if len(values) == 0:
                 continue
 
-            # Try to get today's value (from actual data or forecast)
-            current_value = None
-            if today in series_data.index:
-                # Check forecast first, then actual data
-                if has_forecast and pd.notna(series_data.loc[today, forecast_col]):
-                    current_value = series_data.loc[today, forecast_col]
-                elif pd.notna(series_data.loc[today, y_column]):
-                    current_value = series_data.loc[today, y_column]
-
-            # If no value for today, use most recent available value
-            if current_value is None:
-                if has_forecast:
-                    # Try forecast column first
-                    forecast_values = series_data[forecast_col].dropna()
-                    if len(forecast_values) > 0:
-                        current_value = forecast_values.iloc[-1]
-                    else:
-                        current_value = values.iloc[-1]
-                else:
-                    current_value = values.iloc[-1]
+            # Find the value with date closest to today
+            # Combine actual and forecast data
+            all_data = series_data[[y_column]].copy()
+            if has_forecast and forecast_col in series_data.columns:
+                # Add forecast values where they exist
+                forecast_data = series_data[forecast_col].dropna()
+                if len(forecast_data) > 0:
+                    # Use forecast values, overwriting actual values where forecast exists
+                    all_data[y_column] = all_data[y_column].combine_first(series_data[forecast_col])
+            
+            # Drop NaN and find closest date to today
+            all_data_clean = all_data[y_column].dropna()
+            if len(all_data_clean) == 0:
+                continue
+            
+            # Find index closest to today
+            time_diff = abs(all_data_clean.index - today)
+            closest_idx = time_diff.argmin()
+            current_date = all_data_clean.index[closest_idx]
+            current_value = all_data_clean.iloc[closest_idx]
+            
+            # Calculate trend based on last week
+            one_week_ago = current_date - pd.Timedelta(days=7)
+            time_diff_week = abs(all_data_clean.index - one_week_ago)
+            week_ago_idx = time_diff_week.argmin()
+            week_ago_value = all_data_clean.iloc[week_ago_idx]
+            
+            # Determine trend symbol (using 5% threshold to avoid noise)
+            percent_change = ((current_value - week_ago_value) / week_ago_value * 100) if week_ago_value != 0 else 0
+            if percent_change > 5:
+                trend = "↑"
+            elif percent_change < -5:
+                trend = "↓"
+            else:
+                trend = "→"
 
             # Calculate quintile boundaries from historical data only
             q40 = values.quantile(0.4)
             q60 = values.quantile(0.6)
+            
+            # Calculate percentile rank of current value
+            percentile_rank = (values < current_value).sum() / len(values) * 100
+            # Express as "top X%" or "bottom X%" for better intuition
+            top_percent = 100 - percentile_rank
+            if percentile_rank >= 50:
+                rank_description = f"top {top_percent:.1f}%"
+            else:
+                rank_description = f"bottom {percentile_rank:.1f}%"
+            
+            # Log traffic light information
+            logger.info(
+                f"Traffic light for {series_name}: value={current_value:.4f}, "
+                f"date={current_date}, rank={rank_description}"
+            )
 
             # Determine color
             if current_value >= q60:
-                status[series_name] = "🔴"  # Red: upper two quintiles
+                color = "🔴"  # Red: upper two quintiles
             elif current_value >= q40:
-                status[series_name] = "🟡"  # Yellow: middle quintile
+                color = "🟡"  # Yellow: middle quintile
             else:
-                status[series_name] = "🟢"  # Green: lower two quintiles
+                color = "🟢"  # Green: lower two quintiles
+            
+            status[series_name] = {
+                "color": color,
+                "value": current_value,
+                "date": current_date,
+                "rank": rank_description,
+                "trend": trend
+            }
     else:
         # Calculate for entire dataset
         values = dataframe[y_column].dropna()
 
         if len(values) > 0:
-            # Try to get today's value
-            current_value = None
-            if today in dataframe.index:
-                if has_forecast and pd.notna(dataframe.loc[today, forecast_col]):
-                    current_value = dataframe.loc[today, forecast_col]
-                elif pd.notna(dataframe.loc[today, y_column]):
-                    current_value = dataframe.loc[today, y_column]
-
-            # If no value for today, use most recent
-            if current_value is None:
-                if has_forecast:
-                    forecast_values = dataframe[forecast_col].dropna()
-                    if len(forecast_values) > 0:
-                        current_value = forecast_values.iloc[-1]
-                    else:
-                        current_value = values.iloc[-1]
-                else:
-                    current_value = values.iloc[-1]
+            # Find the value with date closest to today
+            # Combine actual and forecast data
+            all_data = dataframe[[y_column]].copy()
+            if has_forecast and forecast_col in dataframe.columns:
+                # Add forecast values where they exist
+                forecast_data = dataframe[forecast_col].dropna()
+                if len(forecast_data) > 0:
+                    # Use forecast values, overwriting actual values where forecast exists
+                    all_data[y_column] = all_data[y_column].combine_first(dataframe[forecast_col])
+            
+            # Drop NaN and find closest date to today
+            all_data_clean = all_data[y_column].dropna()
+            if len(all_data_clean) == 0:
+                return status
+            
+            # Find index closest to today
+            time_diff = abs(all_data_clean.index - today)
+            closest_idx = time_diff.argmin()
+            current_date = all_data_clean.index[closest_idx]
+            current_value = all_data_clean.iloc[closest_idx]
+            
+            # Calculate trend based on last week
+            one_week_ago = current_date - pd.Timedelta(days=7)
+            time_diff_week = abs(all_data_clean.index - one_week_ago)
+            week_ago_idx = time_diff_week.argmin()
+            week_ago_value = all_data_clean.iloc[week_ago_idx]
+            
+            # Determine trend symbol (using 5% threshold to avoid noise)
+            percent_change = ((current_value - week_ago_value) / week_ago_value * 100) if week_ago_value != 0 else 0
+            if percent_change > 5:
+                trend = "↑"
+            elif percent_change < -5:
+                trend = "↓"
+            else:
+                trend = "→"
 
             q40 = values.quantile(0.4)
             q60 = values.quantile(0.6)
+            
+            # Calculate percentile rank of current value
+            percentile_rank = (values < current_value).sum() / len(values) * 100
+            # Express as "top X%" or "bottom X%" for better intuition
+            top_percent = 100 - percentile_rank
+            if percentile_rank >= 50:
+                rank_description = f"top {top_percent:.1f}%"
+            else:
+                rank_description = f"bottom {percentile_rank:.1f}%"
+            
+            # Log traffic light information
+            logger.info(
+                f"Traffic light for overall: value={current_value:.4f}, "
+                f"date={current_date}, rank={rank_description}"
+            )
 
             if current_value >= q60:
-                status["overall"] = "🔴"
+                color = "🔴"
             elif current_value >= q40:
-                status["overall"] = "🟡"
+                color = "🟡"
             else:
-                status["overall"] = "🟢"
+                color = "🟢"
+            
+            status["overall"] = {
+                "color": color,
+                "value": current_value,
+                "date": current_date,
+                "rank": rank_description,
+                "trend": trend
+            }
 
     return status
 
@@ -553,7 +631,11 @@ with tab2:
             closest_klaerwerk = find_closest_klaerwerk(
                 abwasser, location_manager.location
             )
-            klaerwerk_index = distinct_standorte.index(closest_klaerwerk)
+            # Check if closest_klaerwerk is in the filtered list for the selected Bundesland
+            if closest_klaerwerk in distinct_standorte:
+                klaerwerk_index = distinct_standorte.index(closest_klaerwerk)
+            else:
+                klaerwerk_index = 0
     else:
         # if no location is available, set the index to 0
         klaerwerk_index = 0
@@ -574,6 +656,9 @@ with tab2:
 
         # Store last updated date before adding forecasts
         last_updated = pd.to_datetime(abwasser.index.max()).date()
+        # AMELAG data: weekly data points with 7-day publication delay
+        # Next data point (7 days) + publication delay (7 days) = 14 days total
+        next_update_expected = pd.to_datetime(last_updated) + pd.Timedelta(days=14)
 
         # Add forecasts - the add_forecasts function will skip series without enough data
         # (requires at least 1 year / 52 weeks of data after resampling)
@@ -682,12 +767,21 @@ with tab2:
             "⚠️ Nicht genügend Daten für Prognosen (mindestens 1 Jahr wöchentliche Daten erforderlich)"
         )
     cols = st.columns(len(traffic_lights))
-    for idx, (series_name, light) in enumerate(sorted(traffic_lights.items())):
+    for idx, (series_name, info) in enumerate(sorted(traffic_lights.items())):
         with cols[idx]:
-            st.metric(label=series_name, value=light)
+            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
+            st.caption(f"Wert: {info['value']:.2f}")
+            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
+            st.caption(f"Rang: {info['rank']}")
 
     st.plotly_chart(fig_abwasser, width="stretch")
-    st.caption(f"💡 Letzte Datenaktualisierung: {last_updated}")
+    # Calculate days since last update
+    days_since_update = (pd.Timestamp.today().normalize() - pd.to_datetime(last_updated)).days
+    st.caption(
+        f"💡 Letzte Datenaktualisierung: {last_updated} "
+        f"(vor {days_since_update} Tag{'en' if days_since_update != 1 else ''}) · "
+        f"Nächste Aktualisierung erwartet: {next_update_expected.date()}"
+    )
 
 
 with tab1:
@@ -719,8 +813,8 @@ with tab1:
     split_data = grippeweb["Kalenderwoche"].str.split("-W", expand=True)
     grippeweb = grippeweb.assign(Jahr=split_data[0], Woche=split_data[1])
 
-    # Create date from Jahr and Woche
-    date_str = grippeweb["Jahr"].astype(str) + grippeweb["Woche"].astype(str) + "-5"
+    # Create date from Jahr and Woche - use Sunday (day 7) as the end of the week
+    date_str = grippeweb["Jahr"].astype(str) + grippeweb["Woche"].astype(str) + "-7"
     grippeweb = grippeweb.assign(Datum=pd.to_datetime(date_str, format="%G%V-%u"))
     grippeweb.set_index("Datum", inplace=True)
 
@@ -737,6 +831,9 @@ with tab1:
         )
         last_updated = pd.to_datetime(grippeweb_region.index.max())
         start_date = last_updated - pd.DateOffset(years=2)
+        # GrippeWeb data: week ends on Sunday, published ~4 days later (Thursday)
+        # Next week + 4 days publication delay = 11 days total
+        next_update_expected = last_updated + pd.Timedelta(days=11)
 
         grippeweb_region = add_forecasts(
             grippeweb_region, [percentage_infected_term], facet_col="Erkrankung"
@@ -837,9 +934,12 @@ with tab1:
     st.markdown("**Aktuelle Lage**")
     st.subheader(f"Region {region}")
     cols = st.columns(len(traffic_lights_region))
-    for idx, (series_name, light) in enumerate(sorted(traffic_lights_region.items())):
+    for idx, (series_name, info) in enumerate(sorted(traffic_lights_region.items())):
         with cols[idx]:
-            st.metric(label=series_name, value=light)
+            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
+            st.caption(f"Wert: {info['value']:.2f}")
+            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
+            st.caption(f"Rang: {info['rank']}")
 
     st.plotly_chart(are_ili_by_region, width="stretch")
 
@@ -847,9 +947,12 @@ with tab1:
     st.markdown("**Aktuelle Lage**")
     st.subheader(f"{are_term} nach Altersgruppen")
     cols = st.columns(len(traffic_lights_are))
-    for idx, (series_name, light) in enumerate(sorted(traffic_lights_are.items())):
+    for idx, (series_name, info) in enumerate(sorted(traffic_lights_are.items())):
         with cols[idx]:
-            st.metric(label=series_name, value=light)
+            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
+            st.caption(f"Wert: {info['value']:.2f}")
+            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
+            st.caption(f"Rang: {info['rank']}")
 
     st.plotly_chart(are_by_age_groups, width="stretch")
 
@@ -857,18 +960,28 @@ with tab1:
     st.markdown("**Aktuelle Lage**")
     st.subheader(f"{ili_term} nach Altersgruppen")
     cols = st.columns(len(traffic_lights_ili))
-    for idx, (series_name, light) in enumerate(sorted(traffic_lights_ili.items())):
+    for idx, (series_name, info) in enumerate(sorted(traffic_lights_ili.items())):
         with cols[idx]:
-            st.metric(label=series_name, value=light)
+            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
+            st.caption(f"Wert: {info['value']:.2f}")
+            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
+            st.caption(f"Rang: {info['rank']}")
 
     st.plotly_chart(ili_by_age_groups, width="stretch")
-    st.caption(f"💡 Letzte Datenaktualisierung: {last_updated}")
+    # Calculate days since last update
+    days_since_update = (pd.Timestamp.today().normalize() - last_updated).days
+    st.caption(
+        f"💡 Letzte Datenaktualisierung: {last_updated.date()} "
+        f"(vor {days_since_update} Tag{'en' if days_since_update != 1 else ''}) · "
+        f"Nächste Aktualisierung erwartet: {next_update_expected.date()}"
+    )
 
 text_footer = f"""
     <style>
         footer {{visibility: hidden;}}
     </style>
     <p style="font-size: 0.8em;display:block;text-align:center;">
+        Datenquelle: Robert Koch-Institut<br>
         &copy;{2025} {"Ceyeborg GmbH"} ·
         <a href="https://ceyeb.org/privacy-policy/"
            style="text-decoration: none; color: #FFFFFF;">
