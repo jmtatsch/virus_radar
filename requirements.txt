@@ -1,5 +1,5 @@
 pandas==2.2.3
-plotly==6.6.0
+plotly==6.7.0
 streamlit==1.55.0
 streamlit-geolocation==0.0.10
 statsmodels==0.14.6
