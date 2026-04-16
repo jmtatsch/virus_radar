@@ -596,7 +596,8 @@ klaerwerk_index = 0
 (
     tab1,
     tab2,
-) = st.tabs(["Grippeweb", "Abwasser"])
+    tab3,
+) = st.tabs(["Grippeweb", "Abwasser", "ARE-Konsultationsinzidenz"])
 
 with tab2:
     # Load the abwasser data
@@ -657,8 +658,10 @@ with tab2:
         # Store last updated date before adding forecasts
         last_updated = pd.to_datetime(abwasser.index.max()).date()
         # AMELAG data: weekly data points with 7-day publication delay
+        # Data is usually expected at 15:00 GMT+1
         # Next data point (7 days) + publication delay (7 days) = 14 days total
         next_update_expected = pd.to_datetime(last_updated) + pd.Timedelta(days=14)
+        next_update_time = "ca. 15:00 Uhr"
 
         # Add forecasts - the add_forecasts function will skip series without enough data
         # (requires at least 1 year / 52 weeks of data after resampling)
@@ -775,12 +778,14 @@ with tab2:
             st.caption(f"Rang: {info['rank']}")
 
     st.plotly_chart(fig_abwasser, width="stretch")
-    # Calculate days since last update
-    days_since_update = (pd.Timestamp.today().normalize() - pd.to_datetime(last_updated)).days
+    
+    # Display update information
+    days_since_update_abwasser = (pd.Timestamp.today().normalize() - pd.to_datetime(last_updated)).days
     st.caption(
-        f"💡 Letzte Datenaktualisierung: {last_updated} "
-        f"(vor {days_since_update} Tag{'en' if days_since_update != 1 else ''}) · "
-        f"Nächste Aktualisierung erwartet: {next_update_expected.date()}"
+        f"💡 Datenstand bis **{last_updated}** "
+        f"(vor {days_since_update_abwasser} Tag{'en' if days_since_update_abwasser != 1 else ''}) · "
+        f"Nächste Aktualisierung erwartet am **{next_update_expected.date()} {next_update_time}** · "
+        f"Aktualisierungsrhythmus: wöchentlich"
     )
 
 
@@ -832,8 +837,10 @@ with tab1:
         last_updated = pd.to_datetime(grippeweb_region.index.max())
         start_date = last_updated - pd.DateOffset(years=2)
         # GrippeWeb data: week ends on Sunday, published ~4 days later (Thursday)
+        # Data is usually expected at 10:00 GMT+1
         # Next week + 4 days publication delay = 11 days total
         next_update_expected = last_updated + pd.Timedelta(days=11)
+        next_update_time = "ca. 10:00 Uhr"
 
         grippeweb_region = add_forecasts(
             grippeweb_region, [percentage_infected_term], facet_col="Erkrankung"
@@ -968,21 +975,140 @@ with tab1:
             st.caption(f"Rang: {info['rank']}")
 
     st.plotly_chart(ili_by_age_groups, width="stretch")
-    # Calculate days since last update
-    days_since_update = (pd.Timestamp.today().normalize() - last_updated).days
+    
+    # Display update information
+    days_since_update_grippeweb = (pd.Timestamp.today().normalize() - last_updated).days
     st.caption(
-        f"💡 Letzte Datenaktualisierung: {last_updated.date()} "
-        f"(vor {days_since_update} Tag{'en' if days_since_update != 1 else ''}) · "
-        f"Nächste Aktualisierung erwartet: {next_update_expected.date()}"
+        f"💡 Datenstand bis **{last_updated.date()}** "
+        f"(vor {days_since_update_grippeweb} Tag{'en' if days_since_update_grippeweb != 1 else ''}) · "
+        f"Nächste Aktualisierung erwartet am **{next_update_expected.date()} {next_update_time}** · "
+        f"Aktualisierungsrhythmus: wöchentlich (donnerstags)"
     )
+
+with tab3:
+    # Load the ARE-Konsultationsinzidenz data
+    with st.spinner("Lade ARE-Konsultationsinzidenz-Daten..."):
+        logger.info("Loading ARE-Konsultationsinzidenz data")
+        are_data = pd.read_csv(
+            "data/ARE-Konsultationsinzidenz/ARE-Konsultationsinzidenz.tsv",
+            sep="\t",
+        )
+
+        bundeslaender = sorted(are_data["Bundesland"].unique())
+
+    # Set default Bundesland
+    bundesland_index = 0
+    if "province" in location_manager.location:
+        if location_manager.location["province"] in bundeslaender:
+            bundesland_index = bundeslaender.index(location_manager.location["province"])
+    
+    # If no match found, try to set to "Bundesweit" if available
+    if bundesland_index == 0 and "Bundesweit" in bundeslaender:
+        bundesland_index = bundeslaender.index("Bundesweit")
+
+    selected_bundesland_are = st.selectbox(
+        "Bundesland",
+        bundeslaender,
+        key="bundesland_are",
+        index=bundesland_index,
+        help="Wählen Sie ein Bundesland aus, um ARE-Konsultationsinzidenzen zu sehen",
+    )
+
+    # Parse calendar week data
+    split_data = are_data["Kalenderwoche"].str.split("-W", expand=True)
+    are_data = are_data.assign(Jahr=split_data[0], Woche=split_data[1])
+
+    # Create date from Jahr and Woche - use Sunday (day 7) as the end of the week
+    date_str = are_data["Jahr"].astype(str) + are_data["Woche"].astype(str) + "-7"
+    are_data = are_data.assign(Datum=pd.to_datetime(date_str, format="%G%V-%u"))
+    are_data.set_index("Datum", inplace=True)
+
+    # Filter by selected Bundesland
+    bundesland_data = are_data[are_data["Bundesland"] == selected_bundesland_are].copy()
+
+    # Get last updated date
+    last_updated_are = pd.to_datetime(bundesland_data.index.max())
+    start_date_are = last_updated_are - pd.DateOffset(years=2)
+    # ARE data: weekly data, publication delay similar to GrippeWeb
+    next_update_expected_are = last_updated_are + pd.Timedelta(days=11)
+    next_update_time_are = "ca. 10:00 Uhr"
+
+    # Age group selection
+    available_age_groups = sorted(bundesland_data["Altersgruppe"].unique())
+    selected_age_groups = st.multiselect(
+        "Altersgruppen",
+        available_age_groups,
+        default=available_age_groups[:2] if len(available_age_groups) >= 2 else available_age_groups,
+        help="Wählen Sie Altersgruppen aus, um die ARE-Konsultationsinzidenzen für verschiedene Altersgruppen zu vergleichen",
+    )
+
+    if selected_age_groups:
+        bundesland_data = bundesland_data[bundesland_data["Altersgruppe"].isin(selected_age_groups)]
+
+        with st.spinner("Berechne Prognosen für ARE-Konsultationsinzidenz..."):
+            # Add forecasts for the ARE consultation incidence
+            bundesland_data = add_forecasts(
+                bundesland_data, ["ARE_Konsultationsinzidenz"], facet_col="Altersgruppe"
+            )
+            end_date_are = pd.to_datetime(bundesland_data.index.max())
+            
+            # Create the line plot
+            are_consultation_fig = px.line(
+                bundesland_data,
+                y="ARE_Konsultationsinzidenz",
+                color="Altersgruppe",
+                title=f"ARE-Konsultationsinzidenz nach Altersgruppen - {selected_bundesland_are}",
+                labels={"index": "", "ARE_Konsultationsinzidenz": "Konsultationsinzidenz (pro 100.000)"},
+            )
+            are_consultation_fig = plot_forecast(
+                are_consultation_fig, bundesland_data, "Altersgruppe"
+            )
+            are_consultation_fig = add_quintile_bands(
+                are_consultation_fig,
+                bundesland_data,
+                "ARE_Konsultationsinzidenz",
+                facet_col="Altersgruppe",
+            )
+            are_consultation_fig.update_xaxes(type="date", range=[start_date_are, end_date_are])
+
+            # Get traffic light status
+            traffic_lights_are_consultation = get_traffic_light_status(
+                bundesland_data, "ARE_Konsultationsinzidenz", facet_col="Altersgruppe"
+            )
+
+        # Display traffic lights
+        st.markdown("**Aktuelle Lage**")
+        st.subheader(f"ARE-Konsultationsinzidenz - {selected_bundesland_are}")
+        if traffic_lights_are_consultation:
+            cols = st.columns(len(traffic_lights_are_consultation))
+            for idx, (series_name, info) in enumerate(sorted(traffic_lights_are_consultation.items())):
+                with cols[idx]:
+                    st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
+                    st.caption(f"Wert: {info['value']:.2f}")
+                    st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
+                    st.caption(f"Rang: {info['rank']}")
+
+        st.plotly_chart(are_consultation_fig, width="stretch")
+        
+        # Display update information
+        days_since_update_are = (pd.Timestamp.today().normalize() - last_updated_are).days
+        st.caption(
+            f"💡 Datenstand bis **{last_updated_are.date()}** "
+            f"(vor {days_since_update_are} Tag{'en' if days_since_update_are != 1 else ''}) · "
+            f"Nächste Aktualisierung erwartet am **{next_update_expected_are.date()} {next_update_time_are}** · "
+            f"Aktualisierungsrhythmus: wöchentlich"
+        )
+    else:
+        st.warning("Bitte wählen Sie mindestens eine Altersgruppe aus.")
 
 text_footer = f"""
     <style>
         footer {{visibility: hidden;}}
     </style>
     <p style="font-size: 0.8em;display:block;text-align:center;">
-        Datenquelle: Robert Koch-Institut<br>
-        &copy;{2025} {"Ceyeborg GmbH"} ·
+        Datenquelle: <a href="https://github.com/robert-koch-institut/GrippeWeb_Daten_des_Wochenberichts"
+           style="text-decoration: none; color: #FFFFFF;">Robert Koch-Institut</a><br>
+        &copy;{2026} {"Ceyeborg GmbH"} ·
         <a href="https://ceyeb.org/privacy-policy/"
            style="text-decoration: none; color: #FFFFFF;">
         Privacy Policy

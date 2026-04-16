@@ -1,6 +1,12 @@
 [submodule "data/GrippeWeb_Daten_des_Wochenberichts"]
 	path = data/GrippeWeb_Daten_des_Wochenberichts
 	url = https://github.com/robert-koch-institut/GrippeWeb_Daten_des_Wochenberichts
+	branch = main
 [submodule "data/Abwassersurveillance_AMELAG"]
 	path = data/Abwassersurveillance_AMELAG
 	url = https://github.com/robert-koch-institut/Abwassersurveillance_AMELAG
+	branch = main
+[submodule "data/ARE-Konsultationsinzidenz"]
+	path = data/ARE-Konsultationsinzidenz
+	url = https://github.com/robert-koch-institut/ARE-Konsultationsinzidenz
+	branch = main

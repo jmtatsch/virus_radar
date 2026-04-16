@@ -14,10 +14,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# map English province names to German names for normalization
+english2german_province: Dict[str, str] = {
+    "Baden-Württemberg": "Baden-Wurttemberg",
+    "Bavaria": "Bayern",
+    "Berlin": "Berlin",
+    "Brandenburg": "Brandenburg",
+    "Bremen": "Bremen",
+    "Hamburg": "Hamburg",
+    "Hesse": "Hessen",
+    "Mecklenburg-Western Pomerania": "Mecklenburg-Vorpommern",
+    "Lower Saxony": "Niedersachsen",
+    "North Rhine-Westphalia": "Nordrhein-Westfalen",
+    "Rhineland-Palatinate": "Rheinland-Pfalz",
+    "Saarland": "Saarland",
+    "Saxony": "Sachsen",
+    "Saxony-Anhalt": "Sachsen-Anhalt",
+    "Schleswig-Holstein": "Schleswig-Holstein",
+    "Thuringia": "Thüringen",
+}
+
 # map admin2 to short name e.g. 'bavaria' to 'BY'
 province2short: Dict[str, str] = {
     "Baden-Wurttemberg": "BW",
-    "Bavaria": "BY",
+    "Bayern": "BY",
     "Berlin": "BE",
     "Brandenburg": "BB",
     "Bremen": "HB",
@@ -32,6 +52,7 @@ province2short: Dict[str, str] = {
     "Sachsen-Anhalt": "ST",
     "Schleswig-Holstein": "SH",
     "Thuringen": "TH",
+    "Thüringen": "TH",
 }
 
 # check that all short provinces are in province2short
@@ -205,11 +226,24 @@ class LocationManager:
         """
         if "province" in self.location:
             logger.debug("Adding province short name and region")
+            # Normalize province name from English to German
+            province = self.location["province"]
+            normalized_province = english2german_province.get(province, province)
             # add province short name to location and region
-            self.location["province_short"] = province2short[self.location["province"]]
-            self.location["region"] = province2region[self.location["province_short"]]
-            logger.debug(
-                "Province short: %s, Region: %s",
-                self.location.get("province_short"),
-                self.location.get("region"),
-            )
+            province_short = province2short.get(normalized_province)
+            if province_short:
+                self.location["province_short"] = province_short
+                self.location["region"] = province2region.get(province_short, "Unknown")
+                logger.debug(
+                    "Province short: %s, Region: %s",
+                    self.location.get("province_short"),
+                    self.location.get("region"),
+                )
+            else:
+                logger.warning(
+                    "Province '%s' (normalized: '%s') not found in province2short mapping",
+                    province,
+                    normalized_province,
+                )
+                self.location["province_short"] = None
+                self.location["region"] = "Unknown"
