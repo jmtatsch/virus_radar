@@ -1,11 +1,11 @@
-pandas==3.0.3
 plotly==6.8.0
-streamlit==1.56.0
+pandas==3.0.4
+streamlit==1.58.0
 streamlit-geolocation==0.0.10
 statsmodels==0.14.6
 watchdog==6.0.0
 geopy==2.4.1
 reverse_geocoder==1.5.1
 geocoder==1.38.1
-requests==2.34.0
+requests==2.34.2
 packaging>=23.2
