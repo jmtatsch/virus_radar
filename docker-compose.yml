@@ -4,5 +4,18 @@ services:
     ports:
       - "8503:8501"
     restart: always
-    volumes:
-      - ./app.py:/app/app.py
+    # the container tails the cron log to its stdout, so cap what docker keeps of
+    # it as well; the file inside the container is rotated by logrotate
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # No source bind mount on purpose: mounting app.py alone let the running code
+    # drift from the image without buying hot reload either, because
+    # .streamlit/config.toml switches the file watcher off. For local development
+    # mount the whole source and turn the watcher back on:
+    #   volumes:
+    #     - .:/app
+    #   environment:
+    #     STREAMLIT_SERVER_FILE_WATCHER_TYPE: auto

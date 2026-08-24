@@ -22,11 +22,17 @@ ENV/
 # Documentation
 README.md
 *.md
-!data/**/*.md
 
-# Git (will be explicitly copied in Dockerfile)
+# Git (.gitmodules is explicitly copied in Dockerfile)
+.git/
 .gitignore
 .gitattributes
+
+# Data sets (cloned by update.sh during the build)
+data/
+
+# geonames archive (only the extracted cities1000/ is copied)
+cities1000.zip
 
 # CI/CD
 .github/
