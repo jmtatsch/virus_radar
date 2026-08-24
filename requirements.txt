@@ -7,5 +7,5 @@ watchdog==6.0.0
 geopy==2.4.1
 reverse_geocoder==1.5.1
 geocoder==1.38.1
-packaging>=26.2
+packaging>=26.3
 requests==2.34.2
