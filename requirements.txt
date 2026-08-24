@@ -1,6 +1,6 @@
 plotly==6.8.0
 pandas==3.0.4
-streamlit==1.58.0
+streamlit==1.62.0
 streamlit-geolocation==0.0.10
 statsmodels==0.14.6
 watchdog==6.0.0
