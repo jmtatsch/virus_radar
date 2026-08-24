@@ -1,7 +1,7 @@
 """A class to manage location derived from ip address or from self localization via streamlit_geolocation."""
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Sequence
 
 import streamlit as st
 from streamlit_geolocation import streamlit_geolocation
@@ -14,69 +14,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# map English province names to German names for normalization
-english2german_province: Dict[str, str] = {
-    "Baden-Württemberg": "Baden-Wurttemberg",
-    "Bavaria": "Bayern",
-    "Berlin": "Berlin",
-    "Brandenburg": "Brandenburg",
-    "Bremen": "Bremen",
-    "Hamburg": "Hamburg",
-    "Hesse": "Hessen",
-    "Mecklenburg-Western Pomerania": "Mecklenburg-Vorpommern",
-    "Lower Saxony": "Niedersachsen",
-    "North Rhine-Westphalia": "Nordrhein-Westfalen",
-    "Rhineland-Palatinate": "Rheinland-Pfalz",
-    "Saarland": "Saarland",
-    "Saxony": "Sachsen",
-    "Saxony-Anhalt": "Sachsen-Anhalt",
-    "Schleswig-Holstein": "Schleswig-Holstein",
-    "Thuringia": "Thüringen",
+# canonical German name of every Bundesland, keyed by its official short code
+province_short2german: Dict[str, str] = {
+    "BW": "Baden-Württemberg",
+    "BY": "Bayern",
+    "BE": "Berlin",
+    "BB": "Brandenburg",
+    "HB": "Bremen",
+    "HH": "Hamburg",
+    "HE": "Hessen",
+    "MV": "Mecklenburg-Vorpommern",
+    "NI": "Niedersachsen",
+    "NW": "Nordrhein-Westfalen",
+    "RP": "Rheinland-Pfalz",
+    "SL": "Saarland",
+    "SN": "Sachsen",
+    "ST": "Sachsen-Anhalt",
+    "SH": "Schleswig-Holstein",
+    "TH": "Thüringen",
 }
 
-# map admin2 to short name e.g. 'bavaria' to 'BY'
-province2short: Dict[str, str] = {
-    "Baden-Wurttemberg": "BW",
-    "Bayern": "BY",
-    "Berlin": "BE",
-    "Brandenburg": "BB",
-    "Bremen": "HB",
-    "Hamburg": "HH",
-    "Hessen": "HE",
-    "Mecklenburg-Vorpommern": "MV",
-    "Niedersachsen": "NI",
-    "Nordrhein-Westfalen": "NW",
-    "Rheinland-Pfalz": "RP",
-    "Saarland": "SL",
-    "Sachsen": "SN",
-    "Sachsen-Anhalt": "ST",
-    "Schleswig-Holstein": "SH",
-    "Thuringen": "TH",
-    "Thüringen": "TH",
+# English name of every Bundesland as returned by reverse_geocoder and ipinfo
+province_short2english: Dict[str, str] = {
+    "BW": "Baden-Wuerttemberg",
+    "BY": "Bavaria",
+    "BE": "Berlin",
+    "BB": "Brandenburg",
+    "HB": "Bremen",
+    "HH": "Hamburg",
+    "HE": "Hesse",
+    "MV": "Mecklenburg-Western Pomerania",
+    "NI": "Lower Saxony",
+    "NW": "North Rhine-Westphalia",
+    "RP": "Rhineland-Palatinate",
+    "SL": "Saarland",
+    "SN": "Saxony",
+    "ST": "Saxony-Anhalt",
+    "SH": "Schleswig-Holstein",
+    "TH": "Thuringia",
 }
 
-# check that all short provinces are in province2short
-for province in [
-    "BB",
-    "BE",
-    "BW",
-    "BY",
-    "HB",
-    "HE",
-    "HH",
-    "MV",
-    "NI",
-    "NW",
-    "RP",
-    "SH",
-    "SL",
-    "SN",
-    "ST",
-    "TH",
-]:
-    assert province in province2short.values()
-
-# map admin2 to ['Mitte (West)', 'Norden (West)', 'Osten', 'Sueden']
+# map short province to ['Mitte (West)', 'Norden (West)', 'Osten', 'Sueden']
 province2region: Dict[str, str] = {
     "BW": "Sueden",
     "BY": "Sueden",
@@ -96,26 +74,67 @@ province2region: Dict[str, str] = {
     "TH": "Osten",
 }
 
-# check that all short provinces are in province2region
-for province in [
-    "BB",
-    "BE",
-    "BW",
-    "BY",
-    "HB",
-    "HE",
-    "HH",
-    "MV",
-    "NI",
-    "NW",
-    "RP",
-    "SH",
-    "SL",
-    "SN",
-    "ST",
-    "TH",
-]:
-    assert province in province2region.keys(), f"{province} not in province2region"
+
+def canonical_province_key(name: str) -> str:
+    """
+    Fold a Bundesland name into a spelling-insensitive lookup key.
+
+    Our sources disagree on how to write umlauts: reverse_geocoder returns
+    'Baden-Wuerttemberg', the RKI data sets use 'Thueringen' and we write
+    'Thüringen'. Expanding the umlaut and then collapsing the digraph maps all
+    three spellings ('ü', 'ue', 'u') onto the same key, so a lookup no longer
+    depends on which spelling a source happens to use.
+    """
+    folded = name.strip().lower()
+    for umlaut, digraph in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        folded = folded.replace(umlaut, digraph)
+    for digraph, vowel in (("ae", "a"), ("oe", "o"), ("ue", "u")):
+        folded = folded.replace(digraph, vowel)
+    return "".join(char for char in folded if char.isalpha())
+
+
+# every known spelling of a Bundesland, mapped to its short code
+_province_short_by_key: Dict[str, str] = {
+    canonical_province_key(name): short
+    for mapping in (province_short2german, province_short2english)
+    for short, name in mapping.items()
+}
+
+
+def province_to_short(province: Optional[str]) -> Optional[str]:
+    """
+    Resolve any German or English spelling of a Bundesland to its short code.
+
+    Returns None when the name is empty or does not belong to a Bundesland,
+    e.g. for a province outside Germany.
+    """
+    if not province:
+        return None
+    return _province_short_by_key.get(canonical_province_key(province))
+
+
+def find_province_index(
+    options: Sequence[str], province: Optional[str]
+) -> Optional[int]:
+    """
+    Locate a Bundesland within a data set's own list of Bundesland names.
+
+    Matching goes through the short code, so an English province name from
+    reverse_geocoder also finds the German name used in the RKI data sets.
+    Returns None when the province is unknown or not among options, which lets
+    callers tell 'no match' apart from 'matched the first entry'.
+    """
+    short = province_to_short(province)
+    if short is None:
+        return None
+    keys = {
+        canonical_province_key(province_short2german[short]),
+        canonical_province_key(province_short2english[short]),
+    }
+    for index, option in enumerate(options):
+        if canonical_province_key(option) in keys:
+            return index
+    return None
 
 
 def get_forwarded_ip() -> str | None:
@@ -141,14 +160,15 @@ class LocationManager:
 
     def __init__(self) -> None:
         """
-        Initialize the LocationManager with the path to the geonames file.
+        Determine the visitor's location from their IP address, falling back to
+        browser geolocation whenever that does not yield a German location.
 
-        Args:
-            geonames_file (str): The path to the geonames file.
-            delimiter (str): The delimiter used in the geonames file. Default is tab.
+        'latitude' and 'longitude' are always present in self.location, so
+        callers can test them without guarding every single lookup; any
+        localization path may leave them None.
         """
         self.ip_address: Optional[str] = get_forwarded_ip()
-        self.location: Dict[str, Any] = {}
+        self.location: Dict[str, Any] = {"latitude": None, "longitude": None}
         if self.ip_address:
             logger.info("Using IP address: %s", self.ip_address)
             geocoder_result = geocoder.ipinfo(self.ip_address)
@@ -171,8 +191,11 @@ class LocationManager:
                         geocoder_result.current_result.country,
                     )
                     st.warning(
-                        "You seem to be outside of Germany but the data is only available for Germany. Please select your location of interest manually."
+                        "You seem to be outside of Germany but the data is only available for Germany. Please accept localization via browser or select your location of interest manually."
                     )
+                    # the IP is of no use here, but the browser may still report a
+                    # German position, e.g. when the visitor is behind a VPN
+                    self.get_location_from_browser()
             else:
                 logger.error("Geocoding failed for IP %s", self.ip_address)
                 st.warning(
@@ -204,9 +227,7 @@ class LocationManager:
         Get the province from the location if necessary.
         """
         if (
-            "latitude" in self.location
-            and self.location["latitude"] is not None
-            and "longitude" in self.location
+            self.location["latitude"] is not None
             and self.location["longitude"] is not None
             and not "province" in self.location
         ):
@@ -222,28 +243,28 @@ class LocationManager:
 
     def add_province_short(self) -> None:
         """
-        Add the province short name to the location.
+        Add the short code, the canonical German name and the region of the
+        province to the location.
         """
-        if "province" in self.location:
-            logger.debug("Adding province short name and region")
-            # Normalize province name from English to German
-            province = self.location["province"]
-            normalized_province = english2german_province.get(province, province)
-            # add province short name to location and region
-            province_short = province2short.get(normalized_province)
-            if province_short:
-                self.location["province_short"] = province_short
-                self.location["region"] = province2region.get(province_short, "Unknown")
-                logger.debug(
-                    "Province short: %s, Region: %s",
-                    self.location.get("province_short"),
-                    self.location.get("region"),
-                )
-            else:
+        province = self.location.get("province")
+        province_short = province_to_short(province)
+        if province_short is None:
+            if province:
                 logger.warning(
-                    "Province '%s' (normalized: '%s') not found in province2short mapping",
-                    province,
-                    normalized_province,
+                    "Province '%s' could not be resolved to a Bundesland", province
                 )
-                self.location["province_short"] = None
-                self.location["region"] = "Unknown"
+            self.location["province_short"] = None
+            self.location["province_de"] = None
+            self.location["region"] = "Unknown"
+            return
+
+        self.location["province_short"] = province_short
+        # the German name is what the RKI data sets use to label a Bundesland
+        self.location["province_de"] = province_short2german[province_short]
+        self.location["region"] = province2region[province_short]
+        logger.debug(
+            "Province: %s, short: %s, Region: %s",
+            self.location["province_de"],
+            self.location["province_short"],
+            self.location["region"],
+        )

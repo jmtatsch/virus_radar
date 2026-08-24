@@ -1,16 +1,19 @@
 import logging
-from typing import List
+import warnings
+from typing import List, Optional
 
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from statsmodels.tsa.seasonal import MSTL
 from statsmodels.tsa.api import ExponentialSmoothing
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 import pandas as pd
 from plotly.graph_objs import Figure
+from geopy.distance import geodesic
 
 from geocode import Geocoder
-from location_manager import LocationManager
+from location_manager import LocationManager, find_province_index
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +29,11 @@ ili_term = "Fieber mit Husten oder Halsschmerzen"
 ili_tooltip = "ILI (Influenza-like Illness): Grippeähnliche Erkrankungen mit Fieber und Atemwegssymptomen"
 
 percentage_infected_term = "Erkrankte Bevölkerung in %"
+
+# the weekly grid every forecast is computed on
+forecast_freq = "W-FRI"
+# a series that would have to be interpolated more than this is not worth fitting
+max_interpolated_fraction = 0.25
 
 
 def get_traffic_light_status(
@@ -59,18 +67,18 @@ def get_traffic_light_status(
             if len(values) == 0:
                 continue
 
-            # Find the value with date closest to today
-            # Combine actual and forecast data
-            all_data = series_data[[y_column]].copy()
+            # Find the value with date closest to today, taking it from the
+            # forecast where no observation is available
+            observed = series_data[y_column]
+            combined = observed
             if has_forecast and forecast_col in series_data.columns:
-                # Add forecast values where they exist
-                forecast_data = series_data[forecast_col].dropna()
-                if len(forecast_data) > 0:
-                    # Use forecast values, overwriting actual values where forecast exists
-                    all_data[y_column] = all_data[y_column].combine_first(series_data[forecast_col])
-            
-            # Drop NaN and find closest date to today
-            all_data_clean = all_data[y_column].dropna()
+                combined = observed.combine_first(series_data[forecast_col])
+
+            available = combined.notna()
+            all_data_clean = combined[available]
+            # positionally aligned with all_data_clean: True where the value that
+            # survived came from the forecast rather than from an observation
+            from_forecast = observed[available].isna()
             if len(all_data_clean) == 0:
                 continue
             
@@ -127,25 +135,26 @@ def get_traffic_light_status(
                 "value": current_value,
                 "date": current_date,
                 "rank": rank_description,
-                "trend": trend
+                "trend": trend,
+                "is_forecast": bool(from_forecast.iloc[closest_idx]),
             }
     else:
         # Calculate for entire dataset
         values = dataframe[y_column].dropna()
 
         if len(values) > 0:
-            # Find the value with date closest to today
-            # Combine actual and forecast data
-            all_data = dataframe[[y_column]].copy()
+            # Find the value with date closest to today, taking it from the
+            # forecast where no observation is available
+            observed = dataframe[y_column]
+            combined = observed
             if has_forecast and forecast_col in dataframe.columns:
-                # Add forecast values where they exist
-                forecast_data = dataframe[forecast_col].dropna()
-                if len(forecast_data) > 0:
-                    # Use forecast values, overwriting actual values where forecast exists
-                    all_data[y_column] = all_data[y_column].combine_first(dataframe[forecast_col])
-            
-            # Drop NaN and find closest date to today
-            all_data_clean = all_data[y_column].dropna()
+                combined = observed.combine_first(dataframe[forecast_col])
+
+            available = combined.notna()
+            all_data_clean = combined[available]
+            # positionally aligned with all_data_clean: True where the value that
+            # survived came from the forecast rather than from an observation
+            from_forecast = observed[available].isna()
             if len(all_data_clean) == 0:
                 return status
             
@@ -200,10 +209,74 @@ def get_traffic_light_status(
                 "value": current_value,
                 "date": current_date,
                 "rank": rank_description,
-                "trend": trend
+                "trend": trend,
+                "is_forecast": bool(from_forecast.iloc[closest_idx]),
             }
 
     return status
+
+
+def series_without_forecast(
+    dataframe: pd.DataFrame, y_column: str, facet_col: str
+) -> List[str]:
+    """
+    Names of the series that ended up without a forecast, e.g. because their
+    history is shorter than the two seasonal cycles the model needs.
+    """
+    if facet_col not in dataframe.columns:
+        return []
+    forecast_col = y_column + "_forecast"
+    if forecast_col not in dataframe.columns:
+        return sorted(str(name) for name in dataframe[facet_col].dropna().unique())
+    return sorted(
+        str(name)
+        for name, group in dataframe.groupby(facet_col)
+        if not group[forecast_col].notna().any()
+    )
+
+
+def render_traffic_lights(
+    status: dict,
+    subheader: Optional[str] = None,
+    without_forecast: Optional[List[str]] = None,
+) -> None:
+    """
+    Render the traffic light metrics belonging to one chart.
+
+    Args:
+        status: Mapping of series name to the info dict from get_traffic_light_status
+        subheader: Optional heading naming the chart the metrics belong to
+        without_forecast: Series that have no forecast, named in a notice
+    """
+    st.markdown("**Aktuelle Lage**")
+    if subheader:
+        st.subheader(subheader)
+    if without_forecast:
+        st.info(
+            "Zu wenige Daten für eine Prognose: " + ", ".join(without_forecast)
+        )
+    if not status:
+        # st.columns() rejects a column count of zero, which is what an empty
+        # selection (e.g. no age group picked) would produce
+        st.info("Keine Daten für die aktuelle Auswahl.")
+        return
+    today = pd.Timestamp.today().normalize()
+    cols = st.columns(len(status))
+    for idx, (series_name, info) in enumerate(sorted(status.items())):
+        with cols[idx]:
+            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
+            st.caption(f"Wert: {info['value']:.2f}")
+            # say where the number comes from: otherwise one row of "Aktuelle Lage"
+            # silently mixes next week's forecast with an observation from two
+            # months ago
+            date_caption = f"Datum: {info['date'].strftime('%Y-%m-%d')}"
+            age_days = (today - pd.Timestamp(info["date"])).days
+            if info.get("is_forecast"):
+                date_caption += " (Prognose)"
+            elif age_days > 14:
+                date_caption += f" (vor {age_days} Tagen)"
+            st.caption(date_caption)
+            st.caption(f"Rang: {info['rank']}")
 
 
 st.set_page_config(
@@ -223,17 +296,86 @@ st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 location_manager = LocationManager()
 
 
+def prepare_weekly_series(
+    values: pd.Series, label: str, periods: int
+) -> Optional[pd.Series]:
+    """
+    Put one series onto the gap-free weekly grid a seasonal model can be fitted to.
+
+    Returns None when the series is not suitable for a forecast, having logged why.
+
+    Args:
+        values: The observations, indexed by date
+        label: Name of the series, for the log messages
+        periods: Length of one seasonal cycle in weeks
+    """
+    # Use last() instead of mean() to preserve the most recent value in each week
+    weekly = values.resample(forecast_freq).last()
+
+    first_observed = weekly.first_valid_index()
+    last_observed = weekly.last_valid_index()
+    if first_observed is None:
+        logger.warning("Skipping forecast for %s - no usable data", label)
+        return None
+
+    # Trim to the observed span first. Filling forward past the last real
+    # observation would append up to 12 flat invented weeks and push the start of
+    # the forecast that far beyond the data - one site's forecast began 37 days
+    # after its last measurement.
+    weekly = weekly.loc[first_observed:last_observed]
+
+    # Forward fill gaps - be more lenient (up to 12 weeks for sparse data)
+    weekly = weekly.ffill(limit=12)
+
+    # Backward fill any leading NaNs
+    weekly = weekly.bfill(limit=2)
+
+    # ExponentialSmoothing estimates the initial seasonals from two full cycles and
+    # raises below that, so anything shorter is skipped here instead of attempted.
+    min_weeks_required = periods * 2
+    if len(weekly) < min_weeks_required:
+        logger.warning(
+            "Skipping forecast for %s - %d weeks of data, need %d",
+            label,
+            len(weekly),
+            min_weeks_required,
+        )
+        return None
+
+    interpolated = int(weekly.isna().sum())
+    if interpolated / len(weekly) > max_interpolated_fraction:
+        logger.warning(
+            "Skipping forecast for %s - %d of %d weeks would have to be interpolated",
+            label,
+            interpolated,
+            len(weekly),
+        )
+        return None
+    if interpolated:
+        logger.info("Interpolating %d gap week(s) for %s", interpolated, label)
+        weekly = weekly.interpolate()
+
+    return weekly
+
+
 def add_forecasts(
     df: pd.DataFrame,
     columns_to_forecast: List[str],
     facet_col: str,
     prediction_horizon: int = 12,
     periods: int = 52,
+    non_negative: bool = True,
 ) -> pd.DataFrame:
     """
     For each column in columns_to_forecast, this function fits an Exponential Smoothing model,
     generates a forecast for prediction_horizon time steps, and adds the fitted values and forecast
     as a new column named '{original_column}_forecast' to the dataframe.
+
+    non_negative floors the forecast at zero. Every quantity these data sets
+    measure - viral load, share of the population, consultation incidence - is
+    non-negative and never observed below zero, while an additive trend
+    extrapolates to any value at all: without the floor a third of the wastewater
+    series forecast a negative viral load.
     """
     logger.info("Adding forecasts for columns: %s", columns_to_forecast)
     forecast_dfs = []
@@ -248,67 +390,62 @@ def add_forecasts(
                 logger.info("Converting index to DatetimeIndex for %s", illness)
                 df_illness.index = pd.to_datetime(df_illness.index)
 
-            # Check if we have enough data points before processing
-            non_null_data = df_illness[col].dropna()
-            if len(non_null_data) < periods * 2:
-                logger.warning(
-                    "Skipping forecast for %s - insufficient data (%d points)",
-                    illness,
-                    len(non_null_data),
-                )
-                continue
-
-            # Select only the column to forecast and resample to weekly frequency
-            # Use last() instead of mean() to preserve the most recent value in each week
-            df_illness_col = df_illness[[col]].resample("W-FRI").last()
-
-            # Forward fill gaps - be more lenient (up to 12 weeks for sparse data)
-            df_illness_col = df_illness_col.ffill(limit=12)
-
-            # Backward fill any leading NaNs
-            df_illness_col = df_illness_col.bfill(limit=2)
-
-            # Drop any remaining NaN values
-            df_illness_col = df_illness_col.dropna(subset=[col])
-
-            # Final check for sufficient data (at least 1 year of weekly data)
-            # Reduced from 2 years to handle sparse datasets like RSV
-            min_weeks_required = periods  # 52 weeks = 1 year
-            if len(df_illness_col) < min_weeks_required:
-                logger.warning(
-                    "Skipping forecast for %s - insufficient non-NaN data after processing (%d points after resampling, need %d)",
-                    illness,
-                    len(df_illness_col),
-                    min_weeks_required,
-                )
+            weekly = prepare_weekly_series(df_illness[col], str(illness), periods)
+            if weekly is None:
                 continue
 
             try:
                 # Fit the Exponential Smoothing model for the current column
-                model = ExponentialSmoothing(
-                    df_illness_col[col],
-                    seasonal_periods=periods,
-                    trend="add",
-                    seasonal="add",
-                    use_boxcox=False,
-                    initialization_method="estimated",
-                ).fit()
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    model = ExponentialSmoothing(
+                        weekly,
+                        seasonal_periods=periods,
+                        trend="add",
+                        seasonal="add",
+                        use_boxcox=False,
+                        initialization_method="estimated",
+                    ).fit()
+
+                # statsmodels reports a failed optimisation anonymously, which makes
+                # it impossible to tell which series the forecast belongs to
+                if any(
+                    issubclass(entry.category, ConvergenceWarning) for entry in caught
+                ):
+                    logger.warning(
+                        "Fit for %s did not converge, its forecast is less reliable",
+                        illness,
+                    )
 
                 # Generate forecast for the defined prediction horizon
                 forecast = model.forecast(prediction_horizon)
-
-                # Create a new DataFrame from the forecasted series
-                forecast_df = pd.DataFrame(forecast, columns=[col + "_forecast"])
-
-                # Ensure the forecast index is DatetimeIndex
-                if not isinstance(forecast_df.index, pd.DatetimeIndex):
-                    forecast_df.index = pd.to_datetime(forecast_df.index)
-                forecast_df.loc[:, facet_col] = illness
-                forecast_dfs.append(forecast_df)
-                logger.info("Successfully created forecast for %s", illness)
             except Exception as e:
                 logger.warning("Failed to create forecast for %s: %s", illness, str(e))
                 continue
+
+            if non_negative and (forecast < 0).any():
+                logger.warning(
+                    "Forecast for %s reached %.1f, flooring it at zero",
+                    illness,
+                    forecast.min(),
+                )
+                forecast = forecast.clip(lower=0)
+
+            # Derive the forecast dates from the last observed week rather than
+            # trusting the index statsmodels hands back: it falls back to a
+            # RangeIndex whenever the input index carries no frequency, and those
+            # integers turn into 1970 timestamps when coerced to datetimes.
+            forecast_index = pd.date_range(
+                start=weekly.index[-1],
+                periods=prediction_horizon + 1,
+                freq=forecast_freq,
+            )[1:]
+            forecast_df = pd.DataFrame(
+                {col + "_forecast": forecast.to_numpy()}, index=forecast_index
+            )
+            forecast_df.loc[:, facet_col] = illness
+            forecast_dfs.append(forecast_df)
+            logger.info("Successfully created forecast for %s", illness)
 
     # Concatenate all forecast dataframes with the original dataframe
     if forecast_dfs:
@@ -537,30 +674,54 @@ def decompose_and_plot(df: pd.DataFrame, illness: str, infected_column: str) -> 
     return fig
 
 
-def find_closest_klaerwerk(df: pd.DataFrame, user_location: dict) -> str:
+def find_closest_klaerwerk(df: pd.DataFrame, user_location: dict) -> Optional[str]:
     """
     Finds the closest wastewater treatment plant (Klärwerk) to the given coordinates.
+
+    Returns None when not a single Standort could be geocoded, so that the caller
+    falls back to its own default instead of pointing at an arbitrary plant.
     """
     logger.info("Finding closest Klärwerk to location: %s", user_location)
     local_geocoder = Geocoder()
     # get distinct standorte
-    distinct_standorte = sorted(df["standort"].dropna().unique())
-    distinct_standorte = pd.DataFrame(distinct_standorte, columns=["standort"]).copy()
+    distinct_standorte = pd.DataFrame(
+        sorted(df["standort"].dropna().unique()), columns=["standort"]
+    )
     # add coordinates for each standort
     coordinates = distinct_standorte["standort"].apply(
         lambda x: local_geocoder.geocode(city=x, country="DE")
     )
-    distinct_standorte.loc[:, "latitude"] = coordinates.apply(
-        lambda x: x[0] if x[0] is not None else 0.0
+    distinct_standorte["latitude"] = coordinates.apply(lambda x: x[0])
+    distinct_standorte["longitude"] = coordinates.apply(lambda x: x[1])
+
+    # drop what could not be geocoded rather than placing it at (0, 0), where it
+    # would silently compete for 'closest' with the plants we do have a position for
+    located = distinct_standorte.dropna(subset=["latitude", "longitude"])
+    unresolved = len(distinct_standorte) - len(located)
+    if unresolved:
+        logger.warning(
+            "Could not geocode %d of %d Standorte",
+            unresolved,
+            len(distinct_standorte),
+        )
+    if located.empty:
+        logger.error("No Standort could be geocoded, cannot find closest Klärwerk")
+        return None
+
+    # geodesic distance instead of euclidean degrees: at German latitudes a degree
+    # of longitude covers only ~0.63 of a degree of latitude, so treating the two
+    # alike overstates east-west distances by roughly 60 % and can pick the wrong plant
+    user_coordinates = (user_location["latitude"], user_location["longitude"])
+    distances = located.apply(
+        lambda row: geodesic(user_coordinates, (row["latitude"], row["longitude"])).km,
+        axis=1,
     )
-    distinct_standorte.loc[:, "longitude"] = coordinates.apply(
-        lambda x: x[1] if x[1] is not None else 0.0
+    closest_klaerwerk = located.loc[distances.idxmin()]
+    logger.info(
+        "Closest Klärwerk is %s at %.1f km",
+        closest_klaerwerk["standort"],
+        distances.min(),
     )
-    distinct_standorte.loc[:, "distance"] = (
-        (distinct_standorte["latitude"] - user_location["latitude"]) ** 2
-        + (distinct_standorte["longitude"] - user_location["longitude"]) ** 2
-    ) ** 0.5
-    closest_klaerwerk = distinct_standorte.loc[distinct_standorte["distance"].idxmin()]
     return str(closest_klaerwerk["standort"])
 
 
@@ -609,11 +770,10 @@ with tab2:
             parse_dates=["datum"],
         )
         distinct_province_short = sorted(abwasser["bundesland"].dropna().unique())
-    if "province_short" in location_manager.location:
-        if location_manager.location["province_short"] in distinct_province_short:
-            land_index = distinct_province_short.index(
-                location_manager.location["province_short"]
-            )
+    if location_manager.location["province_short"] in distinct_province_short:
+        land_index = distinct_province_short.index(
+            location_manager.location["province_short"]
+        )
 
     selected_bundesland = st.selectbox(
         "Bundesland", distinct_province_short, index=land_index
@@ -764,18 +924,10 @@ with tab2:
         )
 
     # Display traffic lights
-    st.markdown("**Aktuelle Lage**")
-    if not has_forecasts:
-        st.warning(
-            "⚠️ Nicht genügend Daten für Prognosen (mindestens 1 Jahr wöchentliche Daten erforderlich)"
-        )
-    cols = st.columns(len(traffic_lights))
-    for idx, (series_name, info) in enumerate(sorted(traffic_lights.items())):
-        with cols[idx]:
-            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
-            st.caption(f"Wert: {info['value']:.2f}")
-            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
-            st.caption(f"Rang: {info['rank']}")
+    render_traffic_lights(
+        traffic_lights,
+        without_forecast=series_without_forecast(abwasser, "vorhersage", "typ"),
+    )
 
     st.plotly_chart(fig_abwasser, width="stretch")
     
@@ -800,12 +952,12 @@ with tab1:
 
         regions = sorted(grippeweb["Region"].unique())
 
-    if "region" in location_manager.location:
-        # if region is in the list of regions, set it as default
-        if location_manager.location["region"] in regions:
-            region_index = regions.index(location_manager.location["region"])
-    else:
-        region_index = 4
+    # default to the nationwide view when the visitor's region is unknown, rather
+    # than to whichever region happens to sit at a hardcoded index
+    default_region = "Bundesweit"
+    region_index = regions.index(default_region) if default_region in regions else 0
+    if location_manager.location["region"] in regions:
+        region_index = regions.index(location_manager.location["region"])
     region = st.selectbox(
         "Region",
         regions,
@@ -938,41 +1090,35 @@ with tab1:
         )
 
     # Display regional traffic lights
-    st.markdown("**Aktuelle Lage**")
-    st.subheader(f"Region {region}")
-    cols = st.columns(len(traffic_lights_region))
-    for idx, (series_name, info) in enumerate(sorted(traffic_lights_region.items())):
-        with cols[idx]:
-            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
-            st.caption(f"Wert: {info['value']:.2f}")
-            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
-            st.caption(f"Rang: {info['rank']}")
+    render_traffic_lights(
+        traffic_lights_region,
+        f"Region {region}",
+        without_forecast=series_without_forecast(
+            grippeweb_region, percentage_infected_term, "Erkrankung"
+        ),
+    )
 
     st.plotly_chart(are_ili_by_region, width="stretch")
 
     # Display ARE age group traffic lights
-    st.markdown("**Aktuelle Lage**")
-    st.subheader(f"{are_term} nach Altersgruppen")
-    cols = st.columns(len(traffic_lights_are))
-    for idx, (series_name, info) in enumerate(sorted(traffic_lights_are.items())):
-        with cols[idx]:
-            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
-            st.caption(f"Wert: {info['value']:.2f}")
-            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
-            st.caption(f"Rang: {info['rank']}")
+    render_traffic_lights(
+        traffic_lights_are,
+        f"{are_term} nach Altersgruppen",
+        without_forecast=series_without_forecast(
+            bundesweit_are, percentage_infected_term, "Altersgruppe"
+        ),
+    )
 
     st.plotly_chart(are_by_age_groups, width="stretch")
 
     # Display ILI age group traffic lights
-    st.markdown("**Aktuelle Lage**")
-    st.subheader(f"{ili_term} nach Altersgruppen")
-    cols = st.columns(len(traffic_lights_ili))
-    for idx, (series_name, info) in enumerate(sorted(traffic_lights_ili.items())):
-        with cols[idx]:
-            st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
-            st.caption(f"Wert: {info['value']:.2f}")
-            st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
-            st.caption(f"Rang: {info['rank']}")
+    render_traffic_lights(
+        traffic_lights_ili,
+        f"{ili_term} nach Altersgruppen",
+        without_forecast=series_without_forecast(
+            bundesweit_ili, percentage_infected_term, "Altersgruppe"
+        ),
+    )
 
     st.plotly_chart(ili_by_age_groups, width="stretch")
     
@@ -996,15 +1142,18 @@ with tab3:
 
         bundeslaender = sorted(are_data["Bundesland"].unique())
 
-    # Set default Bundesland
-    bundesland_index = 0
-    if "province" in location_manager.location:
-        if location_manager.location["province"] in bundeslaender:
-            bundesland_index = bundeslaender.index(location_manager.location["province"])
-    
-    # If no match found, try to set to "Bundesweit" if available
-    if bundesland_index == 0 and "Bundesweit" in bundeslaender:
-        bundesland_index = bundeslaender.index("Bundesweit")
+    # Set default Bundesland: the visitor's own if we know it, else the nationwide
+    # view. find_province_index matches through the Bundesland short code, so an
+    # English province name from reverse_geocoder still finds the German name used
+    # in this data set, and it returns None instead of 0 when nothing matches - so
+    # a genuine match on the first entry is no longer mistaken for a failed lookup.
+    bundesland_index = find_province_index(
+        bundeslaender, location_manager.location.get("province")
+    )
+    if bundesland_index is None:
+        bundesland_index = (
+            bundeslaender.index("Bundesweit") if "Bundesweit" in bundeslaender else 0
+        )
 
     selected_bundesland_are = st.selectbox(
         "Bundesland",
@@ -1077,16 +1226,13 @@ with tab3:
             )
 
         # Display traffic lights
-        st.markdown("**Aktuelle Lage**")
-        st.subheader(f"ARE-Konsultationsinzidenz - {selected_bundesland_are}")
-        if traffic_lights_are_consultation:
-            cols = st.columns(len(traffic_lights_are_consultation))
-            for idx, (series_name, info) in enumerate(sorted(traffic_lights_are_consultation.items())):
-                with cols[idx]:
-                    st.metric(label=series_name, value=f"{info['color']} {info['trend']}")
-                    st.caption(f"Wert: {info['value']:.2f}")
-                    st.caption(f"Datum: {info['date'].strftime('%Y-%m-%d')}")
-                    st.caption(f"Rang: {info['rank']}")
+        render_traffic_lights(
+            traffic_lights_are_consultation,
+            f"ARE-Konsultationsinzidenz - {selected_bundesland_are}",
+            without_forecast=series_without_forecast(
+                bundesland_data, "ARE_Konsultationsinzidenz", "Altersgruppe"
+            ),
+        )
 
         st.plotly_chart(are_consultation_fig, width="stretch")
         
