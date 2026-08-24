@@ -27,7 +27,7 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # the tests read the RKI TSVs; depth 1 keeps the ~500 MB of upstream
           # submodule history out of the runner
@@ -72,7 +72,7 @@ jobs:
     name: Image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build
         run: docker build --tag virus-radar:ci .
