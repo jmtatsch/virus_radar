@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 LABEL org.opencontainers.image.description="Virus Radar - German virus infection tracking and forecasting app"
 LABEL org.opencontainers.image.authors="Ceyeborg GmbH"
